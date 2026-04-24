@@ -55,6 +55,9 @@ func New(cfg Config) (*App, error) {
 	if err := st.EnsureDefaultUser(cfg.PanelUser, cfg.PanelPass); err != nil {
 		return nil, err
 	}
+	if err := st.EnsureDefaultPanelSetting(cfg.PanelUser); err != nil {
+		return nil, err
+	}
 	a := &App{cfg: cfg, mux: http.NewServeMux(), store: st}
 	a.routes()
 	return a, nil
@@ -69,12 +72,24 @@ func (a *App) routes() {
 	a.mux.HandleFunc("/auth/login", a.handleLogin)
 	a.mux.HandleFunc("/auth/refresh", a.handleRefresh)
 	a.mux.HandleFunc("/auth/logout", a.handleLogout)
+	a.mux.HandleFunc("/auth/me", a.handleMe)
+
 	a.mux.HandleFunc("/api/inbounds", a.handleListInbounds)
 	a.mux.HandleFunc("/api/inbounds/add", a.handleAddInbound)
 	a.mux.HandleFunc("/api/inbounds/", a.handleInboundSub)
+	a.mux.HandleFunc("/api/inbounds/next-port", a.handleNextPort)
+	a.mux.HandleFunc("/api/inbounds/batch-toggle", a.handleBatchToggleInbounds)
+
 	a.mux.HandleFunc("/api/xray/config", a.handleXrayConfig)
 	a.mux.HandleFunc("/api/xray/export", a.handleXrayExport)
 	a.mux.HandleFunc("/api/xray/apply", a.handleXrayApply)
+
+	a.mux.HandleFunc("/api/forwards", a.handleForwards)
+	a.mux.HandleFunc("/api/forwards/", a.handleForwardsSub)
+
+	a.mux.HandleFunc("/api/panel/settings", a.handlePanelSettings)
+	a.mux.HandleFunc("/api/panel/token", a.handlePanelToken)
+	a.mux.HandleFunc("/api/panel/token/rotate", a.handlePanelTokenRotate)
 
 	// minimal web ui
 	a.mux.Handle("/", http.FileServer(http.Dir("public")))
@@ -161,6 +176,20 @@ func (a *App) handleLogout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.writeJSON(w, http.StatusOK, map[string]any{"success": true})
+}
+
+func (a *App) handleMe(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	_, user, ok := a.extractAuth(r)
+	if !ok {
+		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	ps, _ := a.store.GetPanelSetting()
+	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "user": user, "panelPath": ps.PanelPath})
 }
 
 func (a *App) handleListInbounds(w http.ResponseWriter, r *http.Request) {
@@ -736,6 +765,229 @@ func (a *App) handleXrayApply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "path": a.cfg.XrayConfigOut, "applied": true, "output": string(out)})
+}
+
+func (a *App) handleNextPort(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !a.checkAuth(r) {
+		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	base, _ := strconv.Atoi(strings.TrimSpace(r.URL.Query().Get("base")))
+	p, err := a.store.NextInboundPort(base)
+	if err != nil {
+		a.writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": map[string]any{"port": p}})
+}
+
+func (a *App) handleBatchToggleInbounds(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !a.checkAuth(r) {
+		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	var req struct {
+		IDs    []int64 `json:"ids"`
+		Enable *bool   `json:"enable"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		a.writeErr(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	changed := 0
+	for _, id := range req.IDs {
+		in, ok, err := a.store.GetInbound(id)
+		if err != nil || !ok {
+			continue
+		}
+		if req.Enable != nil {
+			in.Enable = *req.Enable
+		} else {
+			in.Enable = !in.Enable
+		}
+		if _, ok, err := a.store.UpdateInbound(id, in); err == nil && ok {
+			changed++
+		}
+	}
+	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "changed": changed})
+}
+
+func (a *App) handleForwards(w http.ResponseWriter, r *http.Request) {
+	if !a.checkAuth(r) {
+		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		rows, err := a.store.ListForwards()
+		if err != nil {
+			a.writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": rows})
+	case http.MethodPost:
+		var f model.Forward
+		if err := json.NewDecoder(r.Body).Decode(&f); err != nil {
+			a.writeErr(w, http.StatusBadRequest, "invalid json")
+			return
+		}
+		if f.ListenPort <= 0 || f.TargetHost == "" || f.TargetPort <= 0 {
+			a.writeErr(w, http.StatusBadRequest, "listenPort/targetHost/targetPort required")
+			return
+		}
+		if f.Protocol == "" {
+			f.Protocol = "tcp"
+		}
+		obj, err := a.store.AddForward(f)
+		if err != nil {
+			a.writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": obj})
+	default:
+		a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+func (a *App) handleForwardsSub(w http.ResponseWriter, r *http.Request) {
+	if !a.checkAuth(r) {
+		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	parts := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/forwards/"), "/"), "/")
+	if len(parts) == 0 || parts[0] == "" {
+		a.writeErr(w, http.StatusNotFound, "not found")
+		return
+	}
+	id, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil {
+		a.writeErr(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	if len(parts) == 2 && parts[1] == "toggle" {
+		if r.Method != http.MethodPost {
+			a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		obj, ok, err := a.store.ToggleForward(id)
+		if err != nil {
+			a.writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if !ok {
+			a.writeErr(w, http.StatusNotFound, "not found")
+			return
+		}
+		a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": obj})
+		return
+	}
+	switch r.Method {
+	case http.MethodPut:
+		var f model.Forward
+		if err := json.NewDecoder(r.Body).Decode(&f); err != nil {
+			a.writeErr(w, http.StatusBadRequest, "invalid json")
+			return
+		}
+		obj, ok, err := a.store.UpdateForward(id, f)
+		if err != nil {
+			a.writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if !ok {
+			a.writeErr(w, http.StatusNotFound, "not found")
+			return
+		}
+		a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": obj})
+	case http.MethodDelete:
+		ok, err := a.store.DeleteForward(id)
+		if err != nil {
+			a.writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if !ok {
+			a.writeErr(w, http.StatusNotFound, "not found")
+			return
+		}
+		a.writeJSON(w, http.StatusOK, map[string]any{"success": true})
+	default:
+		a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+func (a *App) handlePanelSettings(w http.ResponseWriter, r *http.Request) {
+	if !a.checkAuth(r) {
+		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		p, err := a.store.GetPanelSetting()
+		if err != nil {
+			a.writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": map[string]any{"username": p.Username, "panelPath": p.PanelPath}})
+	case http.MethodPost:
+		var req struct {
+			Username  string `json:"username"`
+			PanelPath string `json:"panelPath"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			a.writeErr(w, http.StatusBadRequest, "invalid json")
+			return
+		}
+		p, err := a.store.UpdatePanelSetting(req.Username, req.PanelPath)
+		if err != nil {
+			a.writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": map[string]any{"username": p.Username, "panelPath": p.PanelPath}})
+	default:
+		a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+func (a *App) handlePanelToken(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !a.checkAuth(r) {
+		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	p, err := a.store.GetPanelSetting()
+	if err != nil {
+		a.writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": map[string]any{"token": p.APIToken}})
+}
+
+func (a *App) handlePanelTokenRotate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !a.checkAuth(r) {
+		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	tok := randomToken(24)
+	p, err := a.store.RotateAPIToken(tok)
+	if err != nil {
+		a.writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": map[string]any{"token": p.APIToken}})
 }
 
 func (a *App) writeErr(w http.ResponseWriter, code int, msg string) {

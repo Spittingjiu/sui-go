@@ -44,3 +44,24 @@ type TokenDB struct {
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }
+
+type ForwardDB struct {
+	ID         uint      `gorm:"primaryKey" json:"id"`
+	Remark     string    `json:"remark"`
+	ListenPort int       `json:"listenPort"`
+	TargetHost string    `json:"targetHost"`
+	TargetPort int       `json:"targetPort"`
+	Protocol   string    `json:"protocol"`
+	Enable     bool      `json:"enable"`
+	CreatedAt  time.Time `json:"createdAt"`
+	UpdatedAt  time.Time `json:"updatedAt"`
+}
+
+type PanelSettingDB struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	Username  string    `json:"username"`
+	PanelPath string    `json:"panelPath"`
+	APIToken  string    `json:"apiToken"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}

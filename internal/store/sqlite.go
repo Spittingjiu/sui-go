@@ -24,10 +24,57 @@ func NewSQLite(dbPath string) (*SQLiteStore, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := db.AutoMigrate(&model.InboundDB{}, &model.UserDB{}, &model.TokenDB{}); err != nil {
+	if err := db.AutoMigrate(&model.InboundDB{}, &model.UserDB{}, &model.TokenDB{}, &model.ForwardDB{}, &model.PanelSettingDB{}); err != nil {
 		return nil, err
 	}
 	return &SQLiteStore{db: db}, nil
+}
+
+func (s *SQLiteStore) EnsureDefaultPanelSetting(username string) error {
+	var cnt int64
+	if err := s.db.Model(&model.PanelSettingDB{}).Count(&cnt).Error; err != nil {
+		return err
+	}
+	if cnt > 0 {
+		return nil
+	}
+	p := model.PanelSettingDB{Username: username, PanelPath: "/", APIToken: ""}
+	return s.db.Create(&p).Error
+}
+
+func (s *SQLiteStore) GetPanelSetting() (model.PanelSettingDB, error) {
+	var p model.PanelSettingDB
+	err := s.db.First(&p).Error
+	return p, err
+}
+
+func (s *SQLiteStore) UpdatePanelSetting(username, panelPath string) (model.PanelSettingDB, error) {
+	p, err := s.GetPanelSetting()
+	if err != nil {
+		return model.PanelSettingDB{}, err
+	}
+	if username != "" {
+		p.Username = username
+	}
+	if panelPath != "" {
+		p.PanelPath = panelPath
+	}
+	if err := s.db.Save(&p).Error; err != nil {
+		return model.PanelSettingDB{}, err
+	}
+	return p, nil
+}
+
+func (s *SQLiteStore) RotateAPIToken(token string) (model.PanelSettingDB, error) {
+	p, err := s.GetPanelSetting()
+	if err != nil {
+		return model.PanelSettingDB{}, err
+	}
+	p.APIToken = token
+	if err := s.db.Save(&p).Error; err != nil {
+		return model.PanelSettingDB{}, err
+	}
+	return p, nil
 }
 
 func (s *SQLiteStore) EnsureDefaultUser(username, password string) error {
@@ -248,4 +295,87 @@ func (s *SQLiteStore) DeleteToken(token string) error {
 
 func (s *SQLiteStore) CleanupExpiredTokens(now time.Time) error {
 	return s.db.Where("expires_at <= ?", now).Delete(&model.TokenDB{}).Error
+}
+
+func (s *SQLiteStore) ListForwards() ([]model.Forward, error) {
+	var rows []model.ForwardDB
+	if err := s.db.Order("id asc").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make([]model.Forward, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, model.Forward{ID: int64(r.ID), Remark: r.Remark, ListenPort: r.ListenPort, TargetHost: r.TargetHost, TargetPort: r.TargetPort, Protocol: r.Protocol, Enable: r.Enable})
+	}
+	return out, nil
+}
+
+func (s *SQLiteStore) AddForward(f model.Forward) (model.Forward, error) {
+	row := model.ForwardDB{Remark: f.Remark, ListenPort: f.ListenPort, TargetHost: f.TargetHost, TargetPort: f.TargetPort, Protocol: f.Protocol, Enable: true}
+	if err := s.db.Create(&row).Error; err != nil {
+		return model.Forward{}, err
+	}
+	f.ID = int64(row.ID)
+	f.Enable = true
+	return f, nil
+}
+
+func (s *SQLiteStore) UpdateForward(id int64, f model.Forward) (model.Forward, bool, error) {
+	var row model.ForwardDB
+	if err := s.db.First(&row, id).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return model.Forward{}, false, nil
+		}
+		return model.Forward{}, false, err
+	}
+	row.Remark = f.Remark
+	row.ListenPort = f.ListenPort
+	row.TargetHost = f.TargetHost
+	row.TargetPort = f.TargetPort
+	row.Protocol = f.Protocol
+	if err := s.db.Save(&row).Error; err != nil {
+		return model.Forward{}, false, err
+	}
+	return model.Forward{ID: int64(row.ID), Remark: row.Remark, ListenPort: row.ListenPort, TargetHost: row.TargetHost, TargetPort: row.TargetPort, Protocol: row.Protocol, Enable: row.Enable}, true, nil
+}
+
+func (s *SQLiteStore) ToggleForward(id int64) (model.Forward, bool, error) {
+	var row model.ForwardDB
+	if err := s.db.First(&row, id).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return model.Forward{}, false, nil
+		}
+		return model.Forward{}, false, err
+	}
+	row.Enable = !row.Enable
+	if err := s.db.Save(&row).Error; err != nil {
+		return model.Forward{}, false, err
+	}
+	return model.Forward{ID: int64(row.ID), Remark: row.Remark, ListenPort: row.ListenPort, TargetHost: row.TargetHost, TargetPort: row.TargetPort, Protocol: row.Protocol, Enable: row.Enable}, true, nil
+}
+
+func (s *SQLiteStore) DeleteForward(id int64) (bool, error) {
+	res := s.db.Delete(&model.ForwardDB{}, id)
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected > 0, nil
+}
+
+func (s *SQLiteStore) NextInboundPort(base int) (int, error) {
+	if base <= 0 {
+		base = 20000
+	}
+	rows, err := s.ListInbounds()
+	if err != nil {
+		return 0, err
+	}
+	used := map[int]bool{}
+	for _, r := range rows {
+		used[r.Port] = true
+	}
+	p := base
+	for used[p] {
+		p++
+	}
+	return p, nil
 }
