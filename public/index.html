@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>sui-go</title>
+  <style>
+    body{font-family:Arial,Helvetica,sans-serif;max-width:980px;margin:24px auto;padding:0 12px;color:#111}
+    .card{border:1px solid #ddd;border-radius:10px;padding:14px;margin-bottom:14px}
+    input,button{padding:8px;border-radius:8px;border:1px solid #ccc}
+    button{cursor:pointer}
+    .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+    table{width:100%;border-collapse:collapse}
+    td,th{border-bottom:1px solid #eee;padding:8px;text-align:left;font-size:14px}
+    .ok{color:#0a7}
+    .err{color:#c33}
+    pre{white-space:pre-wrap;background:#fafafa;border:1px solid #eee;border-radius:8px;padding:8px}
+  </style>
+</head>
+<body>
+  <h2>sui-go 面板（MVP）</h2>
+
+  <div class="card">
+    <h3>1) 登录</h3>
+    <div class="row">
+      <input id="u" placeholder="username" value="admin" />
+      <input id="p" placeholder="password" type="password" value="admin123" />
+      <button id="login">登录</button>
+      <button id="refresh">刷新 token</button>
+      <button id="logout">退出</button>
+    </div>
+    <div id="loginStatus" class="ok"></div>
+  </div>
+
+  <div class="card">
+    <h3>2) 新增 HY2</h3>
+    <div class="row">
+      <input id="remark" placeholder="remark" value="hy2-mvp" />
+      <input id="port" placeholder="port" value="24433" />
+      <input id="pwd" placeholder="password" value="abc123" />
+      <input id="sni" placeholder="sni" value="www.bing.com" />
+      <input id="hopPorts" placeholder="hy2HopPorts" value="25000-25010" />
+      <input id="hopInt" placeholder="hy2HopInterval" value="20-40" />
+      <button id="add">新增</button>
+    </div>
+    <pre id="addOut"></pre>
+  </div>
+
+  <div class="card">
+    <h3>3) Inbounds 列表</h3>
+    <div class="row"><button id="load">刷新列表</button></div>
+    <table>
+      <thead><tr><th>ID</th><th>Remark</th><th>Protocol</th><th>Port</th><th>操作</th></tr></thead>
+      <tbody id="tb"></tbody>
+    </table>
+    <pre id="linkOut"></pre>
+  </div>
+
+<script>
+let token = localStorage.getItem('sui_go_token') || '';
+const $ = id => document.getElementById(id);
+
+async function api(url, opt={}){
+  const h = Object.assign({'content-type':'application/json'}, opt.headers||{});
+  if(token) h['Authorization'] = 'Bearer ' + token;
+  const r = await fetch(url, {...opt, headers:h});
+  const j = await r.json().catch(()=>({success:false,msg:'invalid json'}));
+  if(!r.ok) throw new Error(j.msg || ('http '+r.status));
+  return j;
+}
+
+function setStatus(msg, ok=true){
+  const el=$('loginStatus'); el.textContent=msg; el.className=ok?'ok':'err';
+}
+
+async function doLogin(){
+  try{
+    const j = await api('/auth/login', {method:'POST', body: JSON.stringify({username:$('u').value,password:$('p').value})});
+    token = j.token || '';
+    localStorage.setItem('sui_go_token', token);
+    setStatus('登录成功，token已保存');
+  }catch(e){ setStatus('登录失败: '+e.message, false); }
+}
+
+async function doRefresh(){
+  try{
+    const j = await api('/auth/refresh', {method:'POST'});
+    token = j.token || '';
+    localStorage.setItem('sui_go_token', token);
+    setStatus('token 已刷新');
+  }catch(e){ setStatus('刷新失败: '+e.message, false); }
+}
+
+async function doLogout(){
+  try{ await api('/auth/logout', {method:'POST'}); }catch(_e){}
+  token=''; localStorage.removeItem('sui_go_token');
+  setStatus('已退出');
+}
+
+async function addHy2(){
+  try{
+    const payload={
+      remark:$('remark').value,
+      port:Number($('port').value),
+      protocol:'hysteria',
+      password:$('pwd').value,
+      sni:$('sni').value,
+      hy2HopPorts:$('hopPorts').value,
+      hy2HopInterval:$('hopInt').value
+    };
+    const j=await api('/api/inbounds/add',{method:'POST',body:JSON.stringify(payload)});
+    $('addOut').textContent=JSON.stringify(j,null,2);
+    await loadList();
+  }catch(e){ $('addOut').textContent='新增失败: '+e.message; }
+}
+
+async function loadList(){
+  try{
+    const j=await api('/api/inbounds');
+    const rows=j.obj||[];
+    $('tb').innerHTML = rows.map(x=>`<tr><td>${x.id}</td><td>${x.remark||''}</td><td>${x.protocol||''}</td><td>${x.port||''}</td><td><button onclick="loadLinks(${x.id})">links</button></td></tr>`).join('');
+  }catch(e){ $('tb').innerHTML=`<tr><td colspan="5" class="err">${e.message}</td></tr>`; }
+}
+
+async function loadLinks(id){
+  try{
+    const j=await api(`/api/inbounds/${id}/links`);
+    $('linkOut').textContent = (j.obj||[]).join('\n');
+  }catch(e){ $('linkOut').textContent='读取链接失败: '+e.message; }
+}
+
+$('login').onclick=doLogin;
+$('refresh').onclick=doRefresh;
+$('logout').onclick=doLogout;
+$('add').onclick=addHy2;
+$('load').onclick=loadList;
+
+if(token) setStatus('检测到本地 token，可直接刷新列表');
+</script>
+</body>
+</html>

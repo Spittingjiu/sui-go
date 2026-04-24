@@ -60,6 +60,9 @@ func (a *App) routes() {
 	a.mux.HandleFunc("/api/inbounds", a.handleListInbounds)
 	a.mux.HandleFunc("/api/inbounds/add", a.handleAddInbound)
 	a.mux.HandleFunc("/api/inbounds/", a.handleInboundSub)
+
+	// minimal web ui
+	a.mux.Handle("/", http.FileServer(http.Dir("public")))
 }
 
 func (a *App) handleHealth(w http.ResponseWriter, r *http.Request) {
