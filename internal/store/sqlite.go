@@ -66,19 +66,28 @@ func (s *SQLiteStore) ListInbounds() ([]model.Inbound, error) {
 		_ = json.Unmarshal([]byte(r.Settings), &settings)
 		_ = json.Unmarshal([]byte(r.Stream), &stream)
 		out = append(out, model.Inbound{
-			ID:         int64(r.ID),
-			Remark:     r.Remark,
-			Port:       r.Port,
-			Protocol:   r.Protocol,
-			Password:   r.Password,
-			Network:    r.Network,
-			Security:   r.Security,
-			SNI:        r.SNI,
-			Enable:     r.Enable,
-			Settings:   settings,
-			Stream:     stream,
-			CreateUnix: r.CreatedAt.Unix(),
-			UpdateUnix: r.UpdatedAt.Unix(),
+			ID:          int64(r.ID),
+			Remark:      r.Remark,
+			Port:        r.Port,
+			Protocol:    r.Protocol,
+			Password:    r.Password,
+			UUID:        r.UUID,
+			Email:       r.Email,
+			Method:      r.Method,
+			Flow:        r.Flow,
+			Network:     r.Network,
+			Security:    r.Security,
+			SNI:         r.SNI,
+			Host:        r.Host,
+			Path:        r.Path,
+			RealityDest: r.RealityDest,
+			ShortID:     r.ShortID,
+			PublicKey:   r.PublicKey,
+			Enable:      r.Enable,
+			Settings:    settings,
+			Stream:      stream,
+			CreateUnix:  r.CreatedAt.Unix(),
+			UpdateUnix:  r.UpdatedAt.Unix(),
 		})
 	}
 	return out, nil
@@ -97,19 +106,28 @@ func (s *SQLiteStore) GetInbound(id int64) (model.Inbound, bool, error) {
 	_ = json.Unmarshal([]byte(r.Settings), &settings)
 	_ = json.Unmarshal([]byte(r.Stream), &stream)
 	return model.Inbound{
-		ID:         int64(r.ID),
-		Remark:     r.Remark,
-		Port:       r.Port,
-		Protocol:   r.Protocol,
-		Password:   r.Password,
-		Network:    r.Network,
-		Security:   r.Security,
-		SNI:        r.SNI,
-		Enable:     r.Enable,
-		Settings:   settings,
-		Stream:     stream,
-		CreateUnix: r.CreatedAt.Unix(),
-		UpdateUnix: r.UpdatedAt.Unix(),
+		ID:          int64(r.ID),
+		Remark:      r.Remark,
+		Port:        r.Port,
+		Protocol:    r.Protocol,
+		Password:    r.Password,
+		UUID:        r.UUID,
+		Email:       r.Email,
+		Method:      r.Method,
+		Flow:        r.Flow,
+		Network:     r.Network,
+		Security:    r.Security,
+		SNI:         r.SNI,
+		Host:        r.Host,
+		Path:        r.Path,
+		RealityDest: r.RealityDest,
+		ShortID:     r.ShortID,
+		PublicKey:   r.PublicKey,
+		Enable:      r.Enable,
+		Settings:    settings,
+		Stream:      stream,
+		CreateUnix:  r.CreatedAt.Unix(),
+		UpdateUnix:  r.UpdatedAt.Unix(),
 	}, true, nil
 }
 
@@ -117,17 +135,26 @@ func (s *SQLiteStore) AddInbound(in model.Inbound) (model.Inbound, error) {
 	settings, _ := json.Marshal(in.Settings)
 	stream, _ := json.Marshal(in.Stream)
 	row := model.InboundDB{
-		Remark:   in.Remark,
-		Port:     in.Port,
-		Protocol: in.Protocol,
-		Password: in.Password,
-		Network:  in.Network,
-		Security: in.Security,
-		SNI:      in.SNI,
-		Enable:   true,
-		Settings: string(settings),
-		Stream:   string(stream),
-		Tag:      fmt.Sprintf("inbound-%d", time.Now().UnixNano()),
+		Remark:      in.Remark,
+		Port:        in.Port,
+		Protocol:    in.Protocol,
+		Password:    in.Password,
+		UUID:        in.UUID,
+		Email:       in.Email,
+		Method:      in.Method,
+		Flow:        in.Flow,
+		Network:     in.Network,
+		Security:    in.Security,
+		SNI:         in.SNI,
+		Host:        in.Host,
+		Path:        in.Path,
+		RealityDest: in.RealityDest,
+		ShortID:     in.ShortID,
+		PublicKey:   in.PublicKey,
+		Enable:      true,
+		Settings:    string(settings),
+		Stream:      string(stream),
+		Tag:         fmt.Sprintf("inbound-%d", time.Now().UnixNano()),
 	}
 	if err := s.db.Create(&row).Error; err != nil {
 		return model.Inbound{}, err
@@ -153,9 +180,18 @@ func (s *SQLiteStore) UpdateInbound(id int64, in model.Inbound) (model.Inbound, 
 	row.Port = in.Port
 	row.Protocol = in.Protocol
 	row.Password = in.Password
+	row.UUID = in.UUID
+	row.Email = in.Email
+	row.Method = in.Method
+	row.Flow = in.Flow
 	row.Network = in.Network
 	row.Security = in.Security
 	row.SNI = in.SNI
+	row.Host = in.Host
+	row.Path = in.Path
+	row.RealityDest = in.RealityDest
+	row.ShortID = in.ShortID
+	row.PublicKey = in.PublicKey
 	row.Settings = string(settings)
 	row.Stream = string(stream)
 	if err := s.db.Save(&row).Error; err != nil {

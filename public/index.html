@@ -36,9 +36,21 @@
     <h3>2) HY2 新增 / 编辑</h3>
     <div class="row">
       <input id="id" placeholder="id(编辑时自动填)" style="width:140px" />
+      <select id="proto">
+        <option value="hysteria">hysteria2(hy2)</option>
+        <option value="vless">vless</option>
+        <option value="vmess">vmess</option>
+        <option value="trojan">trojan</option>
+        <option value="shadowsocks">shadowsocks</option>
+      </select>
       <input id="remark" placeholder="remark" value="hy2-mvp" />
       <input id="port" placeholder="port" value="24433" />
-      <input id="pwd" placeholder="password" value="abc123" />
+      <input id="uuid" placeholder="uuid(vless/vmess)" />
+      <input id="pwd" placeholder="password(hy2/trojan/ss)" value="abc123" />
+      <input id="method" placeholder="ss method" value="aes-128-gcm" />
+      <input id="net" placeholder="network(tcp/ws/hysteria)" value="hysteria" />
+      <input id="host" placeholder="host(ws/http)" />
+      <input id="path" placeholder="path(ws)" />
       <input id="sni" placeholder="sni" value="www.bing.com" />
       <input id="hopPorts" placeholder="hy2HopPorts" value="25000-25010" />
       <input id="hopInt" placeholder="hy2HopInterval" value="20-40" />
@@ -104,8 +116,13 @@ function getPayload(){
   return {
     remark:$('remark').value,
     port:Number($('port').value),
-    protocol:'hysteria',
+    protocol:$('proto').value,
+    uuid:$('uuid').value,
     password:$('pwd').value,
+    method:$('method').value,
+    network:$('net').value,
+    host:$('host').value,
+    path:$('path').value,
     sni:$('sni').value,
     hy2HopPorts:$('hopPorts').value,
     hy2HopInterval:$('hopInt').value
@@ -114,9 +131,15 @@ function getPayload(){
 
 function fillForm(x){
   $('id').value = x.id || '';
+  $('proto').value = x.protocol || 'hysteria';
   $('remark').value = x.remark || '';
   $('port').value = x.port || '';
+  $('uuid').value = x.uuid || '';
   $('pwd').value = x.password || '';
+  $('method').value = x.method || 'aes-128-gcm';
+  $('net').value = x.network || '';
+  $('host').value = x.host || '';
+  $('path').value = x.path || '';
   $('sni').value = x.sni || '';
   const hop = (((x.streamSettings||{}).hysteriaSettings||{}).udphop)||{};
   $('hopPorts').value = hop.ports || '';
@@ -125,9 +148,15 @@ function fillForm(x){
 
 function resetForm(){
   $('id').value='';
+  $('proto').value='hysteria';
   $('remark').value='hy2-mvp';
   $('port').value='24433';
+  $('uuid').value='';
   $('pwd').value='abc123';
+  $('method').value='aes-128-gcm';
+  $('net').value='hysteria';
+  $('host').value='';
+  $('path').value='';
   $('sni').value='www.bing.com';
   $('hopPorts').value='25000-25010';
   $('hopInt').value='20-40';

@@ -9,6 +9,7 @@ Go 版本的 SUI（对标 s-ui 的 Go 架构方向），用于逐步替换现有
 - SQLite 持久化（gorm）
 - 认证接口 `POST /auth/login`（Bearer Token 访问受保护 API）
 - inbounds 接口：list/add/get/update/delete
+- 协议支持（当前）：hysteria(v2)/vless/vmess/trojan/shadowsocks
 - full 接口兼容：`GET/PUT /api/inbounds/:id/full`
 - hysteria2(hy2) 入站创建/更新
 - hy2 UDP hop (`udphop`) 参数支持（`hy2HopPorts` / `hy2HopInterval`）
@@ -77,9 +78,9 @@ Go 版本的 SUI（对标 s-ui 的 Go 架构方向），用于逐步替换现有
 ## 路线图（对标 s-ui）
 
 1. 认证增强：改密与会话策略细化
-2. 协议层：vless/vmess/trojan/ss/reality/xhttp 等全量迁移
+2. 协议层：补 reality/xhttp 细项与更多 streamSettings
 3. 运行层：xray/sing-box 进程控制与配置生成
-4. 前端层：迁移现有 `public/index.html` 到 Go embed + API 适配
+4. 前端层：继续补齐参数面板与协议细分表单
 5. 发布层：升级脚本与版本发布流程
 
 ## License

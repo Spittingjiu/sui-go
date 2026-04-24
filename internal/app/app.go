@@ -2,6 +2,7 @@ package app
 
 import (
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -326,22 +327,31 @@ func buildInboundFromReq(req model.AddInboundRequest) (model.Inbound, error) {
 	if req.Port <= 0 || req.Protocol == "" {
 		return model.Inbound{}, fmt.Errorf("port/protocol required")
 	}
+	proto := strings.ToLower(strings.TrimSpace(req.Protocol))
 	in := model.Inbound{
-		Remark:   req.Remark,
-		Port:     req.Port,
-		Protocol: req.Protocol,
-		Password: req.Password,
-		UUID:     req.UUID,
-		Email:    req.Email,
-		Network:  req.Network,
-		Security: req.Security,
-		SNI:      req.SNI,
-		Settings: map[string]any{},
-		Stream:   map[string]any{},
-		Extra:    map[string]any{},
+		Remark:      req.Remark,
+		Port:        req.Port,
+		Protocol:    proto,
+		Password:    req.Password,
+		UUID:        req.UUID,
+		Email:       req.Email,
+		Method:      req.Method,
+		Flow:        req.Flow,
+		Network:     req.Network,
+		Security:    req.Security,
+		SNI:         req.SNI,
+		Host:        req.Host,
+		Path:        req.Path,
+		RealityDest: req.RealityDest,
+		ShortID:     req.ShortID,
+		PublicKey:   req.PublicKey,
+		Settings:    map[string]any{},
+		Stream:      map[string]any{},
+		Extra:       map[string]any{},
 	}
 
-	if strings.EqualFold(req.Protocol, "hysteria") || strings.EqualFold(req.Protocol, "hysteria2") {
+	switch proto {
+	case "hysteria", "hysteria2":
 		in.Protocol = "hysteria"
 		if in.Network == "" {
 			in.Network = "hysteria"
@@ -352,6 +362,7 @@ func buildInboundFromReq(req model.AddInboundRequest) (model.Inbound, error) {
 		if in.SNI == "" {
 			in.SNI = "www.bing.com"
 		}
+		in.Settings = map[string]any{"version": 2, "clients": []map[string]any{{"auth": in.Password, "email": in.Email}}}
 		in.Stream = map[string]any{
 			"network":  "hysteria",
 			"security": "tls",
@@ -365,11 +376,37 @@ func buildInboundFromReq(req model.AddInboundRequest) (model.Inbound, error) {
 		hopInterval := normalizeHopInterval(req.HY2HopInterval)
 		if hopPorts != "" {
 			hs := in.Stream["hysteriaSettings"].(map[string]any)
-			hs["udphop"] = map[string]any{
-				"ports":    hopPorts,
-				"interval": hopInterval,
-			}
+			hs["udphop"] = map[string]any{"ports": hopPorts, "interval": hopInterval}
 		}
+	case "vless":
+		if in.Network == "" {
+			in.Network = "tcp"
+		}
+		in.Settings = map[string]any{"clients": []map[string]any{{"id": in.UUID, "email": in.Email, "flow": in.Flow}}, "decryption": "none"}
+		in.Stream = map[string]any{"network": in.Network, "security": in.Security}
+	case "vmess":
+		if in.Network == "" {
+			in.Network = "tcp"
+		}
+		in.Settings = map[string]any{"clients": []map[string]any{{"id": in.UUID, "alterId": 0, "email": in.Email}}}
+		in.Stream = map[string]any{"network": in.Network, "security": in.Security}
+	case "trojan":
+		if in.Network == "" {
+			in.Network = "tcp"
+		}
+		if in.Security == "" {
+			in.Security = "tls"
+		}
+		in.Settings = map[string]any{"clients": []map[string]any{{"password": in.Password, "email": in.Email}}}
+		in.Stream = map[string]any{"network": in.Network, "security": in.Security}
+	case "shadowsocks", "ss":
+		in.Protocol = "shadowsocks"
+		if in.Method == "" {
+			in.Method = "aes-128-gcm"
+		}
+		in.Settings = map[string]any{"method": in.Method, "password": in.Password, "network": "tcp,udp"}
+	default:
+		return model.Inbound{}, fmt.Errorf("unsupported protocol: %s", proto)
 	}
 	return in, nil
 }
@@ -394,30 +431,101 @@ func (a *App) checkAuth(r *http.Request) bool {
 }
 
 func buildLinks(in model.Inbound) []string {
-	if in.Protocol != "hysteria" {
-		return []string{}
-	}
 	host := "127.0.0.1"
-	query := url.Values{}
-	if in.SNI != "" {
-		query.Set("sni", in.SNI)
-	}
-	if hs, ok := in.Stream["hysteriaSettings"].(map[string]any); ok {
-		if hop, ok := hs["udphop"].(map[string]any); ok {
-			if ports, ok := hop["ports"].(string); ok && strings.TrimSpace(ports) != "" {
-				query.Set("mport", ports)
-			}
-			if iv, ok := hop["interval"].(string); ok && strings.TrimSpace(iv) != "" {
-				query.Set("mportInterval", iv)
-			}
-		}
-	}
-	query.Set("insecure", "1")
 	name := in.Remark
 	if name == "" {
 		name = fmt.Sprintf("inbound-%d", time.Now().Unix())
 	}
-	return []string{fmt.Sprintf("hy2://%s@%s:%d?%s#%s", url.QueryEscape(in.Password), host, in.Port, query.Encode(), url.QueryEscape(name))}
+	switch in.Protocol {
+	case "hysteria":
+		query := url.Values{}
+		if in.SNI != "" {
+			query.Set("sni", in.SNI)
+		}
+		if hs, ok := in.Stream["hysteriaSettings"].(map[string]any); ok {
+			if hop, ok := hs["udphop"].(map[string]any); ok {
+				if ports, ok := hop["ports"].(string); ok && strings.TrimSpace(ports) != "" {
+					query.Set("mport", ports)
+				}
+				if iv, ok := hop["interval"].(string); ok && strings.TrimSpace(iv) != "" {
+					query.Set("mportInterval", iv)
+				}
+			}
+		}
+		query.Set("insecure", "1")
+		return []string{fmt.Sprintf("hy2://%s@%s:%d?%s#%s", url.QueryEscape(in.Password), host, in.Port, query.Encode(), url.QueryEscape(name))}
+	case "vless":
+		q := url.Values{}
+		t := in.Network
+		if t == "" {
+			t = "tcp"
+		}
+		q.Set("type", t)
+		if in.Security != "" {
+			q.Set("security", in.Security)
+		}
+		if in.SNI != "" {
+			q.Set("sni", in.SNI)
+		}
+		if in.Host != "" {
+			q.Set("host", in.Host)
+		}
+		if in.Path != "" {
+			q.Set("path", in.Path)
+		}
+		if in.Flow != "" {
+			q.Set("flow", in.Flow)
+		}
+		if in.Security == "reality" {
+			if in.PublicKey != "" {
+				q.Set("pbk", in.PublicKey)
+			}
+			if in.ShortID != "" {
+				q.Set("sid", in.ShortID)
+			}
+		}
+		return []string{fmt.Sprintf("vless://%s@%s:%d?%s#%s", url.QueryEscape(in.UUID), host, in.Port, q.Encode(), url.QueryEscape(name))}
+	case "trojan":
+		q := url.Values{}
+		t := in.Network
+		if t == "" {
+			t = "tcp"
+		}
+		q.Set("type", t)
+		q.Set("security", "tls")
+		if in.SNI != "" {
+			q.Set("sni", in.SNI)
+		}
+		if in.Host != "" {
+			q.Set("host", in.Host)
+		}
+		if in.Path != "" {
+			q.Set("path", in.Path)
+		}
+		return []string{fmt.Sprintf("trojan://%s@%s:%d?%s#%s", url.QueryEscape(in.Password), host, in.Port, q.Encode(), url.QueryEscape(name))}
+	case "shadowsocks":
+		method := in.Method
+		if method == "" {
+			method = "aes-128-gcm"
+		}
+		raw := base64.RawURLEncoding.EncodeToString([]byte(fmt.Sprintf("%s:%s", method, in.Password)))
+		return []string{fmt.Sprintf("ss://%s@%s:%d#%s", raw, host, in.Port, url.QueryEscape(name))}
+	case "vmess":
+		j := map[string]any{
+			"v": "2", "ps": name, "add": host, "port": strconv.Itoa(in.Port), "id": in.UUID,
+			"aid": "0", "net": in.Network, "type": "none", "host": in.Host, "path": in.Path,
+			"tls": func() string {
+				if in.Security != "" {
+					return in.Security
+				}
+				return ""
+			}(), "sni": in.SNI,
+		}
+		b, _ := json.Marshal(j)
+		return []string{"vmess://" + base64.RawStdEncoding.EncodeToString(b)}
+	default:
+		return []string{}
+	}
 }
 
 func normalizeHopPorts(raw string) string {
