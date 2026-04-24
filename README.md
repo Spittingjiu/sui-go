@@ -4,13 +4,14 @@ Go 版本的 SUI（对标 s-ui 的 Go 架构方向），用于逐步替换现有
 
 ## 当前状态
 
-当前为 **Phase-1 骨架版**：
+当前为 **Phase-2 迭代版**：
 - Go 原生 HTTP 服务
-- inbounds 基础 CRUD（当前已实现 list/add）
+- SQLite 持久化（gorm）
+- 认证接口 `POST /auth/login`（Bearer Token 访问受保护 API）
+- inbounds 基础接口（list/add/links）
 - hysteria2(hy2) 入站创建
 - hy2 UDP hop (`udphop`) 参数支持（`hy2HopPorts` / `hy2HopInterval`）
 - `hy2://` 链接导出支持 `mport` / `mportInterval`
-- 本地 JSON 持久化（后续可切 SQLite）
 
 ## 快速启动
 
@@ -20,14 +21,17 @@ Go 版本的 SUI（对标 s-ui 的 Go 架构方向），用于逐步替换现有
   - `:8811`
 - 可用环境变量：
   - `ADDR`（默认 `:8811`）
-  - `DATA_FILE`（默认 `data/inbounds.json`）
+  - `DB_FILE`（默认 `data/sui-go.db`）
+  - `PANEL_USER`（默认 `admin`）
+  - `PANEL_PASS`（默认 `admin123`）
 
 ## API（Phase-1）
 
 - `GET /api/health`
-- `GET /api/inbounds`
-- `POST /api/inbounds/add`
-- `GET /api/inbounds/:id/links`
+- `POST /auth/login`
+- `GET /api/inbounds`（需 Bearer Token）
+- `POST /api/inbounds/add`（需 Bearer Token）
+- `GET /api/inbounds/:id/links`（需 Bearer Token）
 
 示例（新增 hy2 + 端口跳跃）：
 

@@ -12,14 +12,16 @@ func main() {
 	if addr == "" {
 		addr = ":8811"
 	}
-	dataFile := os.Getenv("DATA_FILE")
-	if dataFile == "" {
-		dataFile = "data/inbounds.json"
+	dbFile := os.Getenv("DB_FILE")
+	if dbFile == "" {
+		dbFile = "data/sui-go.db"
 	}
 
 	a, err := app.New(app.Config{
-		Addr:     addr,
-		DataFile: dataFile,
+		Addr:      addr,
+		DBFile:    dbFile,
+		PanelUser: os.Getenv("PANEL_USER"),
+		PanelPass: os.Getenv("PANEL_PASS"),
 	})
 	if err != nil {
 		log.Fatal(err)

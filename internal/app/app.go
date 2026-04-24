@@ -1,12 +1,15 @@
 package app
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Spittingjiu/sui-go/internal/model"
@@ -14,22 +17,37 @@ import (
 )
 
 type Config struct {
-	Addr     string
-	DataFile string
+	Addr      string
+	DataFile  string
+	DBFile    string
+	PanelUser string
+	PanelPass string
 }
 
 type App struct {
 	cfg   Config
 	mux   *http.ServeMux
-	store *store.Store
+	store *store.SQLiteStore
+
+	tokMu  sync.RWMutex
+	tokens map[string]string // token -> username
 }
 
 func New(cfg Config) (*App, error) {
-	st, err := store.New(cfg.DataFile)
+	st, err := store.NewSQLite(cfg.DBFile)
 	if err != nil {
 		return nil, err
 	}
-	a := &App{cfg: cfg, mux: http.NewServeMux(), store: st}
+	if cfg.PanelUser == "" {
+		cfg.PanelUser = "admin"
+	}
+	if cfg.PanelPass == "" {
+		cfg.PanelPass = "admin123"
+	}
+	if err := st.EnsureDefaultUser(cfg.PanelUser, cfg.PanelPass); err != nil {
+		return nil, err
+	}
+	a := &App{cfg: cfg, mux: http.NewServeMux(), store: st, tokens: map[string]string{}}
 	a.routes()
 	return a, nil
 }
@@ -40,6 +58,7 @@ func (a *App) Run() error {
 
 func (a *App) routes() {
 	a.mux.HandleFunc("/api/health", a.handleHealth)
+	a.mux.HandleFunc("/auth/login", a.handleLogin)
 	a.mux.HandleFunc("/api/inbounds", a.handleListInbounds)
 	a.mux.HandleFunc("/api/inbounds/add", a.handleAddInbound)
 	a.mux.HandleFunc("/api/inbounds/", a.handleInboundSub)
@@ -49,17 +68,65 @@ func (a *App) handleHealth(w http.ResponseWriter, r *http.Request) {
 	a.writeJSON(w, http.StatusOK, map[string]any{"ok": true, "mode": "sui-go"})
 }
 
+func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		a.writeErr(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	ok, err := a.store.CheckUser(req.Username, req.Password)
+	if err != nil {
+		a.writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !ok {
+		a.writeErr(w, http.StatusUnauthorized, "invalid username/password")
+		return
+	}
+	tok := randomToken(24)
+	a.tokMu.Lock()
+	a.tokens[tok] = req.Username
+	a.tokMu.Unlock()
+	a.writeJSON(w, http.StatusOK, map[string]any{
+		"success":   true,
+		"token":     tok,
+		"user":      req.Username,
+		"mustReset": false,
+		"panelPath": "/",
+	})
+}
+
 func (a *App) handleListInbounds(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": a.store.List()})
+	if !a.checkAuth(r) {
+		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	rows, err := a.store.ListInbounds()
+	if err != nil {
+		a.writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": rows})
 }
 
 func (a *App) handleAddInbound(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !a.checkAuth(r) {
+		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 	var req model.AddInboundRequest
@@ -118,7 +185,7 @@ func (a *App) handleAddInbound(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	created, err := a.store.Add(in)
+	created, err := a.store.AddInbound(in)
 	if err != nil {
 		a.writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -127,6 +194,10 @@ func (a *App) handleAddInbound(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) handleInboundSub(w http.ResponseWriter, r *http.Request) {
+	if !a.checkAuth(r) {
+		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
 	// /api/inbounds/:id/links
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/inbounds/"), "/")
 	if len(parts) != 2 || parts[1] != "links" {
@@ -138,13 +209,29 @@ func (a *App) handleInboundSub(w http.ResponseWriter, r *http.Request) {
 		a.writeErr(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	in, ok := a.store.Get(id)
+	in, ok, err := a.store.GetInbound(id)
+	if err != nil {
+		a.writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if !ok {
 		a.writeErr(w, http.StatusNotFound, "not found")
 		return
 	}
 	links := buildLinks(in)
 	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": links})
+}
+
+func (a *App) checkAuth(r *http.Request) bool {
+	h := strings.TrimSpace(r.Header.Get("Authorization"))
+	if !strings.HasPrefix(strings.ToLower(h), "bearer ") {
+		return false
+	}
+	tok := strings.TrimSpace(h[len("Bearer "):])
+	a.tokMu.RLock()
+	_, ok := a.tokens[tok]
+	a.tokMu.RUnlock()
+	return ok
 }
 
 func buildLinks(in model.Inbound) []string {
@@ -189,7 +276,6 @@ func normalizeHopInterval(raw string) string {
 	if s == "" {
 		return "30"
 	}
-	// allow N or A-B; fallback 30
 	if strings.Contains(s, "-") {
 		p := strings.SplitN(s, "-", 2)
 		if len(p) == 2 {
@@ -206,6 +292,14 @@ func normalizeHopInterval(raw string) string {
 		return "30"
 	}
 	return strconv.Itoa(n)
+}
+
+func randomToken(bytes int) string {
+	buf := make([]byte, bytes)
+	if _, err := rand.Read(buf); err != nil {
+		return fmt.Sprintf("tok-%d", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(buf)
 }
 
 func (a *App) writeErr(w http.ResponseWriter, code int, msg string) {
