@@ -52,11 +52,18 @@ Go 版本的 SUI（对标 s-ui 的 Go 架构方向），用于逐步替换现有
 - `GET/POST /api/panel/settings`（需 Bearer Token）
 - `GET /api/panel/token`（需 Bearer Token）
 - `POST /api/panel/token/rotate`（需 Bearer Token）
+- `POST /api/panel/change-password`（需 Bearer Token）
+- `POST /api/panel/connect-sub`（需 Bearer Token）
 - `GET/POST /api/forwards`（需 Bearer Token）
 - `PUT/DELETE /api/forwards/:id`（需 Bearer Token）
 - `POST /api/forwards/:id/toggle`（需 Bearer Token）
 - `GET /api/inbounds/next-port`（需 Bearer Token）
 - `POST /api/inbounds/batch-toggle`（需 Bearer Token）
+- `POST /api/inbounds/add-reality-quick`（需 Bearer Token）
+- `POST /api/inbounds/:id/toggle`（需 Bearer Token）
+- `GET /api/inbounds/:id/qr`（需 Bearer Token）
+- `GET /api/system/status`（需 Bearer Token）
+- `GET /api/view/bootstrap`（需 Bearer Token）
 
 示例（新增 hy2 + 端口跳跃）：
 

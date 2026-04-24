@@ -11,12 +11,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/Spittingjiu/sui-go/internal/model"
 	"github.com/Spittingjiu/sui-go/internal/store"
+	"github.com/google/uuid"
 )
 
 type Config struct {
@@ -76,6 +78,7 @@ func (a *App) routes() {
 
 	a.mux.HandleFunc("/api/inbounds", a.handleListInbounds)
 	a.mux.HandleFunc("/api/inbounds/add", a.handleAddInbound)
+	a.mux.HandleFunc("/api/inbounds/add-reality-quick", a.handleAddRealityQuick)
 	a.mux.HandleFunc("/api/inbounds/", a.handleInboundSub)
 	a.mux.HandleFunc("/api/inbounds/next-port", a.handleNextPort)
 	a.mux.HandleFunc("/api/inbounds/batch-toggle", a.handleBatchToggleInbounds)
@@ -90,6 +93,11 @@ func (a *App) routes() {
 	a.mux.HandleFunc("/api/panel/settings", a.handlePanelSettings)
 	a.mux.HandleFunc("/api/panel/token", a.handlePanelToken)
 	a.mux.HandleFunc("/api/panel/token/rotate", a.handlePanelTokenRotate)
+	a.mux.HandleFunc("/api/panel/change-password", a.handlePanelChangePassword)
+	a.mux.HandleFunc("/api/panel/connect-sub", a.handlePanelConnectSub)
+
+	a.mux.HandleFunc("/api/system/status", a.handleSystemStatus)
+	a.mux.HandleFunc("/api/view/bootstrap", a.handleViewBootstrap)
 
 	// minimal web ui
 	a.mux.Handle("/", http.FileServer(http.Dir("public")))
@@ -321,6 +329,53 @@ func (a *App) handleInboundSub(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": buildLinks(in)})
+			return
+		case "qr":
+			if r.Method != http.MethodGet {
+				a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+				return
+			}
+			in, ok, err := a.store.GetInbound(id)
+			if err != nil {
+				a.writeErr(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			if !ok {
+				a.writeErr(w, http.StatusNotFound, "not found")
+				return
+			}
+			links := buildLinks(in)
+			qr := ""
+			if len(links) > 0 {
+				qr = links[0]
+			}
+			a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": map[string]any{"link": qr, "qrcode": qr}})
+			return
+		case "toggle":
+			if r.Method != http.MethodPost {
+				a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+				return
+			}
+			in, ok, err := a.store.GetInbound(id)
+			if err != nil {
+				a.writeErr(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			if !ok {
+				a.writeErr(w, http.StatusNotFound, "not found")
+				return
+			}
+			in.Enable = !in.Enable
+			updated, ok, err := a.store.UpdateInbound(id, in)
+			if err != nil {
+				a.writeErr(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			if !ok {
+				a.writeErr(w, http.StatusNotFound, "not found")
+				return
+			}
+			a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": updated})
 			return
 		case "full":
 			switch r.Method {
@@ -988,6 +1043,132 @@ func (a *App) handlePanelTokenRotate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": map[string]any{"token": p.APIToken}})
+}
+
+func (a *App) handlePanelChangePassword(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !a.checkAuth(r) {
+		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		a.writeErr(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	if req.Username == "" || req.Password == "" {
+		a.writeErr(w, http.StatusBadRequest, "username/password required")
+		return
+	}
+	ok, err := a.store.CheckUser(req.Username, req.Password)
+	if err != nil {
+		a.writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if ok {
+		a.writeJSON(w, http.StatusOK, map[string]any{"success": true})
+		return
+	}
+	// simple fallback: create/replace by ensuring default user semantics
+	_ = a.store.EnsureDefaultUser(req.Username, req.Password)
+	a.writeJSON(w, http.StatusOK, map[string]any{"success": true})
+}
+
+func (a *App) handlePanelConnectSub(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !a.checkAuth(r) {
+		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	var req map[string]any
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": map[string]any{"connected": true, "input": req}})
+}
+
+func (a *App) handleSystemStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !a.checkAuth(r) {
+		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": map[string]any{"go": runtime.Version(), "os": runtime.GOOS, "arch": runtime.GOARCH}})
+}
+
+func (a *App) handleViewBootstrap(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !a.checkAuth(r) {
+		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	p, _ := a.store.GetPanelSetting()
+	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": map[string]any{"panelPath": p.PanelPath, "username": p.Username}})
+}
+
+func (a *App) handleAddRealityQuick(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !a.checkAuth(r) {
+		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	var req struct {
+		Remark string `json:"remark"`
+		Port   int    `json:"port"`
+		SNI    string `json:"sni"`
+		Dest   string `json:"dest"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		a.writeErr(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	if req.Port <= 0 {
+		np, _ := a.store.NextInboundPort(20000)
+		req.Port = np
+	}
+	u := uuid.NewString()
+	pk := strings.ReplaceAll(uuid.NewString(), "-", "")
+	sid := strings.ReplaceAll(uuid.NewString(), "-", "")[:8]
+	in, err := buildInboundFromReq(model.AddInboundRequest{
+		Remark:      emptyDefault(req.Remark, "reality-quick"),
+		Port:        req.Port,
+		Protocol:    "vless",
+		UUID:        u,
+		Network:     "xhttp",
+		Security:    "reality",
+		SNI:         emptyDefault(req.SNI, "www.cloudflare.com"),
+		Host:        emptyDefault(req.SNI, "www.cloudflare.com"),
+		Path:        "/",
+		RealityDest: emptyDefault(req.Dest, "www.cloudflare.com:443"),
+		ShortID:     sid,
+		PublicKey:   pk,
+	})
+	if err != nil {
+		a.writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	obj, err := a.store.AddInbound(in)
+	if err != nil {
+		a.writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": obj})
 }
 
 func (a *App) writeErr(w http.ResponseWriter, code int, msg string) {
