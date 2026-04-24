@@ -55,13 +55,30 @@ Go 版本的 SUI（对标 s-ui 的 Go 架构方向），用于逐步替换现有
 }
 ```
 
+## 部署（新增）
+
+已提供一键安装脚本与 systemd 单元模板：
+- `install.sh`
+- `sui-go.service`
+
+快速安装：
+- `sudo bash install.sh`
+
+安装后常用命令：
+- `systemctl status sui-go --no-pager`
+- `systemctl restart sui-go`
+- `journalctl -u sui-go -n 100 --no-pager`
+
+环境变量文件：
+- `/etc/default/sui-go`
+
 ## 路线图（对标 s-ui）
 
 1. 认证增强：token 持久化/过期刷新/改密
 2. 协议层：vless/vmess/trojan/ss/reality/xhttp 等全量迁移
 3. 运行层：xray/sing-box 进程控制与配置生成
 4. 前端层：迁移现有 `public/index.html` 到 Go embed + API 适配
-5. 发布层：systemd + install.sh + 一键升级
+5. 发布层：升级脚本与版本发布流程
 
 ## License
 

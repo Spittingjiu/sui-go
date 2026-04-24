@@ -1,0 +1,15 @@
+[Unit]
+Description=SUI-Go Panel Service
+After=network.target
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/default/sui-go
+WorkingDirectory=/opt/sui-go
+ExecStart=/usr/local/bin/sui-go
+Restart=always
+RestartSec=2
+User=root
+
+[Install]
+WantedBy=multi-user.target
