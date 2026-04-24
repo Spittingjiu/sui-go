@@ -2,6 +2,14 @@
 
 Go 版本的 SUI（对标 s-ui 的 Go 架构方向），用于逐步替换现有 Node 面板。
 
+## 一键安装（推荐）
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Spittingjiu/sui-go/main/install.sh | bash
+```
+
+> 点击上面代码块右上角「复制」按钮即可。
+
 ## 当前状态
 
 当前为 **Phase-3 迭代版**：
@@ -102,7 +110,7 @@ Go 版本的 SUI（对标 s-ui 的 Go 架构方向），用于逐步替换现有
 
 快速安装：
 - 本地仓库安装：`sudo bash install.sh`
-- 一键远程安装：`curl -fsSL https://raw.githubusercontent.com/Spittingjiu/sui-go/main/install.sh | bash`
+- 一键远程安装：`curl -fsSL https://raw.githubusercontent.com/Spittingjiu/sui-go/main/install.sh | bash`（已在文档顶部置顶）
 
 安装后常用命令：
 - `systemctl status sui-go --no-pager`
