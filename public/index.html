@@ -135,6 +135,7 @@
             <button id="refresh" class="ghost">刷新 token</button>
             <button id="logout" class="ghost">退出</button>
             <button id="load" class="ghost">刷新数据</button>
+            <button id="updatePanel" class="ghost">更新面板</button>
           </div>
           <div class="stats" style="margin-top:10px">
             <div class="stat"><div class="k">Inbound 总数</div><div class="v" id="stTotal">0</div></div>
@@ -441,6 +442,19 @@ async function applyCfg(){
   }catch(e){ $('cfgOut').textContent='应用失败: '+e.message; }
 }
 
+async function updatePanel(){
+  if(!confirm('确认更新面板？将执行 git pull + go build 并自动重启 sui-go。')) return;
+  try{
+    const j=await api('/api/system/update-panel',{method:'POST'});
+    $('cfgOut').textContent=JSON.stringify(j,null,2);
+    setStatus('面板更新完成，正在重连...', true);
+    setTimeout(()=>location.reload(), 1200);
+  }catch(e){
+    $('cfgOut').textContent='更新面板失败: '+e.message;
+    setStatus('更新失败: '+e.message, false);
+  }
+}
+
 $('login').onclick=doLogin;
 $('refresh').onclick=doRefresh;
 $('logout').onclick=doLogout;
@@ -451,6 +465,7 @@ $('reset').onclick=resetForm;
 $('cfgShow').onclick=showCfg;
 $('cfgExport').onclick=exportCfg;
 $('cfgApply').onclick=applyCfg;
+$('updatePanel').onclick=updatePanel;
 $('proto').onchange=updateFieldVisibility;
 $('sec').onchange=updateFieldVisibility;
 

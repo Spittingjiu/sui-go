@@ -98,6 +98,7 @@ func (a *App) routes() {
 
 	a.mux.HandleFunc("/api/system/status", a.handleSystemStatus)
 	a.mux.HandleFunc("/api/system/restart-panel", a.handleSystemRestartPanel)
+	a.mux.HandleFunc("/api/system/update-panel", a.handleSystemUpdatePanel)
 	a.mux.HandleFunc("/api/system/chain/test", a.handleSystemChainTest)
 	a.mux.HandleFunc("/api/system/restart-xray", a.handleSystemRestartXray)
 	a.mux.HandleFunc("/api/system/restart-xui", a.handleSystemRestartXUI)
@@ -1210,6 +1211,28 @@ func (a *App) handleSystemRestartPanel(w http.ResponseWriter, r *http.Request) {
 	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "output": out, "error": errString(err)})
 }
 
+func (a *App) handleSystemUpdatePanel(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !a.checkAuth(r) {
+		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	panelDir := os.Getenv("PANEL_APP_DIR")
+	if strings.TrimSpace(panelDir) == "" {
+		panelDir = "/opt/sui-go"
+	}
+	cmd := fmt.Sprintf("set -e; cd %s; test -d .git; branch=$(git rev-parse --abbrev-ref HEAD || echo main); git fetch --all --prune; git pull --ff-only origin \"$branch\"; go build -o sui-go ./cmd/sui-go; install -m 0755 sui-go /usr/local/bin/sui-go; (nohup systemctl restart sui-go >/dev/null 2>&1 &) ; echo updated:$branch", shellQuote(panelDir))
+	out, err := a.runBestEffort(cmd)
+	if err != nil {
+		a.writeErr(w, http.StatusInternalServerError, strings.TrimSpace(out)+"\n"+err.Error())
+		return
+	}
+	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "msg": "panel updated", "output": strings.TrimSpace(out), "dir": panelDir})
+}
+
 func (a *App) handleSystemChainTest(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -1358,6 +1381,10 @@ func (a *App) handleSystemXraySwitch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "msg": "switch placeholder"})
+}
+
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
 }
 
 func errString(err error) string {
