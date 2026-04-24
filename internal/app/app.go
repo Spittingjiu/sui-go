@@ -9,7 +9,6 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/Spittingjiu/sui-go/internal/model"
@@ -28,9 +27,6 @@ type App struct {
 	cfg   Config
 	mux   *http.ServeMux
 	store *store.SQLiteStore
-
-	tokMu  sync.RWMutex
-	tokens map[string]string // token -> username
 }
 
 func New(cfg Config) (*App, error) {
@@ -47,7 +43,7 @@ func New(cfg Config) (*App, error) {
 	if err := st.EnsureDefaultUser(cfg.PanelUser, cfg.PanelPass); err != nil {
 		return nil, err
 	}
-	a := &App{cfg: cfg, mux: http.NewServeMux(), store: st, tokens: map[string]string{}}
+	a := &App{cfg: cfg, mux: http.NewServeMux(), store: st}
 	a.routes()
 	return a, nil
 }
@@ -59,6 +55,8 @@ func (a *App) Run() error {
 func (a *App) routes() {
 	a.mux.HandleFunc("/api/health", a.handleHealth)
 	a.mux.HandleFunc("/auth/login", a.handleLogin)
+	a.mux.HandleFunc("/auth/refresh", a.handleRefresh)
+	a.mux.HandleFunc("/auth/logout", a.handleLogout)
 	a.mux.HandleFunc("/api/inbounds", a.handleListInbounds)
 	a.mux.HandleFunc("/api/inbounds/add", a.handleAddInbound)
 	a.mux.HandleFunc("/api/inbounds/", a.handleInboundSub)
@@ -91,16 +89,60 @@ func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tok := randomToken(24)
-	a.tokMu.Lock()
-	a.tokens[tok] = req.Username
-	a.tokMu.Unlock()
+	expiresAt := time.Now().Add(24 * time.Hour)
+	if err := a.store.SaveToken(tok, req.Username, expiresAt); err != nil {
+		a.writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	a.writeJSON(w, http.StatusOK, map[string]any{
-		"success":   true,
-		"token":     tok,
-		"user":      req.Username,
-		"mustReset": false,
-		"panelPath": "/",
+		"success":     true,
+		"token":       tok,
+		"user":        req.Username,
+		"mustReset":   false,
+		"panelPath":   "/",
+		"expiresUnix": expiresAt.Unix(),
 	})
+}
+
+func (a *App) handleRefresh(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	tok, username, ok := a.extractAuth(r)
+	if !ok {
+		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	newTok := randomToken(24)
+	expiresAt := time.Now().Add(24 * time.Hour)
+	if err := a.store.RefreshToken(tok, newTok, expiresAt); err != nil {
+		a.writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	a.writeJSON(w, http.StatusOK, map[string]any{
+		"success":     true,
+		"token":       newTok,
+		"user":        username,
+		"expiresUnix": expiresAt.Unix(),
+	})
+}
+
+func (a *App) handleLogout(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	tok, _, ok := a.extractAuth(r)
+	if !ok {
+		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	if err := a.store.DeleteToken(tok); err != nil {
+		a.writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	a.writeJSON(w, http.StatusOK, map[string]any{"success": true})
 }
 
 func (a *App) handleListInbounds(w http.ResponseWriter, r *http.Request) {
@@ -329,16 +371,22 @@ func buildInboundFromReq(req model.AddInboundRequest) (model.Inbound, error) {
 	return in, nil
 }
 
-func (a *App) checkAuth(r *http.Request) bool {
+func (a *App) extractAuth(r *http.Request) (token, username string, ok bool) {
 	h := strings.TrimSpace(r.Header.Get("Authorization"))
 	parts := strings.Fields(h)
 	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
-		return false
+		return "", "", false
 	}
 	tok := strings.TrimSpace(parts[1])
-	a.tokMu.RLock()
-	_, ok := a.tokens[tok]
-	a.tokMu.RUnlock()
+	user, valid, err := a.store.ValidateToken(tok, time.Now())
+	if err != nil || !valid {
+		return "", "", false
+	}
+	return tok, user, true
+}
+
+func (a *App) checkAuth(r *http.Request) bool {
+	_, _, ok := a.extractAuth(r)
 	return ok
 }
 

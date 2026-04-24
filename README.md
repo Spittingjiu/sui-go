@@ -30,6 +30,8 @@ Go 版本的 SUI（对标 s-ui 的 Go 架构方向），用于逐步替换现有
 
 - `GET /api/health`
 - `POST /auth/login`
+- `POST /auth/refresh`
+- `POST /auth/logout`
 - `GET /api/inbounds`（需 Bearer Token）
 - `POST /api/inbounds/add`（需 Bearer Token）
 - `GET /api/inbounds/:id`（需 Bearer Token）
@@ -74,7 +76,7 @@ Go 版本的 SUI（对标 s-ui 的 Go 架构方向），用于逐步替换现有
 
 ## 路线图（对标 s-ui）
 
-1. 认证增强：token 持久化/过期刷新/改密
+1. 认证增强：改密与会话策略细化
 2. 协议层：vless/vmess/trojan/ss/reality/xhttp 等全量迁移
 3. 运行层：xray/sing-box 进程控制与配置生成
 4. 前端层：迁移现有 `public/index.html` 到 Go embed + API 适配

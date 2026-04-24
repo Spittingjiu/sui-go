@@ -24,7 +24,7 @@ func NewSQLite(dbPath string) (*SQLiteStore, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := db.AutoMigrate(&model.InboundDB{}, &model.UserDB{}); err != nil {
+	if err := db.AutoMigrate(&model.InboundDB{}, &model.UserDB{}, &model.TokenDB{}); err != nil {
 		return nil, err
 	}
 	return &SQLiteStore{db: db}, nil
@@ -171,4 +171,45 @@ func (s *SQLiteStore) DeleteInbound(id int64) (bool, error) {
 		return false, res.Error
 	}
 	return res.RowsAffected > 0, nil
+}
+
+func (s *SQLiteStore) SaveToken(token, username string, expiresAt time.Time) error {
+	t := model.TokenDB{Token: token, Username: username, ExpiresAt: expiresAt}
+	return s.db.Create(&t).Error
+}
+
+func (s *SQLiteStore) ValidateToken(token string, now time.Time) (string, bool, error) {
+	var t model.TokenDB
+	err := s.db.Where("token = ?", token).First(&t).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	if !t.ExpiresAt.After(now) {
+		_ = s.db.Delete(&t).Error
+		return "", false, nil
+	}
+	return t.Username, true, nil
+}
+
+func (s *SQLiteStore) RefreshToken(oldToken, newToken string, expiresAt time.Time) error {
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&model.TokenDB{}).Where("token = ?", oldToken).Updates(map[string]any{
+			"token":      newToken,
+			"expires_at": expiresAt,
+		}).Error; err != nil {
+			return err
+		}
+		return nil
+	})
+}
+
+func (s *SQLiteStore) DeleteToken(token string) error {
+	return s.db.Where("token = ?", token).Delete(&model.TokenDB{}).Error
+}
+
+func (s *SQLiteStore) CleanupExpiredTokens(now time.Time) error {
+	return s.db.Where("expires_at <= ?", now).Delete(&model.TokenDB{}).Error
 }

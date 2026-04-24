@@ -26,3 +26,12 @@ type UserDB struct {
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }
+
+type TokenDB struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	Token     string    `gorm:"uniqueIndex;size:96" json:"token"`
+	Username  string    `gorm:"index;size:64" json:"username"`
+	ExpiresAt time.Time `gorm:"index" json:"expiresAt"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
