@@ -457,6 +457,7 @@ func buildInboundFromReq(req model.AddInboundRequest) (model.Inbound, error) {
 		RealityDest: req.RealityDest,
 		ShortID:     req.ShortID,
 		PublicKey:   req.PublicKey,
+		PrivateKey:  req.PrivateKey,
 		Settings:    map[string]any{},
 		Stream:      map[string]any{},
 		Extra:       map[string]any{},
@@ -513,7 +514,7 @@ func buildInboundFromReq(req model.AddInboundRequest) (model.Inbound, error) {
 				"show":        false,
 				"dest":        emptyDefault(in.RealityDest, "www.cloudflare.com:443"),
 				"serverNames": []string{emptyDefault(in.SNI, "www.cloudflare.com")},
-				"privateKey":  "",
+				"privateKey":  in.PrivateKey,
 				"shortIds":    []string{in.ShortID},
 			}
 		}
@@ -1068,30 +1069,33 @@ func (a *App) handlePanelChangePassword(w http.ResponseWriter, r *http.Request) 
 		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
+	_, user, ok := a.extractAuth(r)
+	if !ok {
+		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
 	var req struct {
-		Username string `json:"username"`
-		Password string `json:"password"`
+		OldPassword string `json:"oldPassword"`
+		NewPassword string `json:"newPassword"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		a.writeErr(w, http.StatusBadRequest, "invalid json")
 		return
 	}
-	if req.Username == "" || req.Password == "" {
-		a.writeErr(w, http.StatusBadRequest, "username/password required")
+	if len(strings.TrimSpace(req.NewPassword)) < 6 {
+		a.writeErr(w, http.StatusBadRequest, "new password too short")
 		return
 	}
-	ok, err := a.store.CheckUser(req.Username, req.Password)
+	changed, err := a.store.ChangeUserPassword(user, req.OldPassword, req.NewPassword)
 	if err != nil {
 		a.writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if ok {
-		a.writeJSON(w, http.StatusOK, map[string]any{"success": true})
+	if !changed {
+		a.writeErr(w, http.StatusBadRequest, "old password incorrect")
 		return
 	}
-	// simple fallback: create/replace by ensuring default user semantics
-	_ = a.store.EnsureDefaultUser(req.Username, req.Password)
-	a.writeJSON(w, http.StatusOK, map[string]any{"success": true})
+	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "msg": "password updated"})
 }
 
 func (a *App) handlePanelConnectSub(w http.ResponseWriter, r *http.Request) {
@@ -1158,6 +1162,7 @@ func (a *App) handleAddRealityQuick(w http.ResponseWriter, r *http.Request) {
 	}
 	u := uuid.NewString()
 	pk := strings.ReplaceAll(uuid.NewString(), "-", "")
+	prv := strings.ReplaceAll(uuid.NewString(), "-", "")
 	sid := strings.ReplaceAll(uuid.NewString(), "-", "")[:8]
 	in, err := buildInboundFromReq(model.AddInboundRequest{
 		Remark:      emptyDefault(req.Remark, "reality-quick"),
@@ -1172,6 +1177,7 @@ func (a *App) handleAddRealityQuick(w http.ResponseWriter, r *http.Request) {
 		RealityDest: emptyDefault(req.Dest, "www.cloudflare.com:443"),
 		ShortID:     sid,
 		PublicKey:   pk,
+		PrivateKey:  prv,
 	})
 	if err != nil {
 		a.writeErr(w, http.StatusBadRequest, err.Error())
@@ -1324,7 +1330,7 @@ func (a *App) handleSystemXrayConfig(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		a.handleXrayConfig(w, r)
 	case http.MethodPost:
-		a.handleXrayApply(w, &http.Request{Method: http.MethodPost, Header: r.Header, Body: r.Body, URL: r.URL})
+		a.handleXrayApply(w, r)
 	default:
 		a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 	}

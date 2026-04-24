@@ -18,6 +18,7 @@ type Inbound struct {
 	RealityDest string         `json:"realityDest,omitempty"`
 	ShortID     string         `json:"shortId,omitempty"`
 	PublicKey   string         `json:"publicKey,omitempty"`
+	PrivateKey  string         `json:"privateKey,omitempty"`
 	Enable      bool           `json:"enable"`
 	Settings    map[string]any `json:"settings,omitempty"`
 	Stream      map[string]any `json:"streamSettings,omitempty"`
@@ -43,6 +44,7 @@ type AddInboundRequest struct {
 	RealityDest    string `json:"realityDest"`
 	ShortID        string `json:"shortId"`
 	PublicKey      string `json:"publicKey"`
+	PrivateKey     string `json:"privateKey"`
 	HY2HopPorts    string `json:"hy2HopPorts"`
 	HY2HopInterval string `json:"hy2HopInterval"`
 }

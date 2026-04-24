@@ -89,6 +89,25 @@ func (s *SQLiteStore) EnsureDefaultUser(username, password string) error {
 	return s.db.Create(&u).Error
 }
 
+func (s *SQLiteStore) ChangeUserPassword(username, oldPassword, newPassword string) (bool, error) {
+	var u model.UserDB
+	err := s.db.Where("username = ?", username).First(&u).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return false, nil
+		}
+		return false, err
+	}
+	if u.Password != oldPassword {
+		return false, nil
+	}
+	u.Password = newPassword
+	if err := s.db.Save(&u).Error; err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func (s *SQLiteStore) CheckUser(username, password string) (bool, error) {
 	var u model.UserDB
 	err := s.db.Where("username = ?", username).First(&u).Error
@@ -130,6 +149,7 @@ func (s *SQLiteStore) ListInbounds() ([]model.Inbound, error) {
 			RealityDest: r.RealityDest,
 			ShortID:     r.ShortID,
 			PublicKey:   r.PublicKey,
+			PrivateKey:  r.PrivateKey,
 			Enable:      r.Enable,
 			Settings:    settings,
 			Stream:      stream,
@@ -170,6 +190,7 @@ func (s *SQLiteStore) GetInbound(id int64) (model.Inbound, bool, error) {
 		RealityDest: r.RealityDest,
 		ShortID:     r.ShortID,
 		PublicKey:   r.PublicKey,
+		PrivateKey:  r.PrivateKey,
 		Enable:      r.Enable,
 		Settings:    settings,
 		Stream:      stream,
@@ -198,6 +219,7 @@ func (s *SQLiteStore) AddInbound(in model.Inbound) (model.Inbound, error) {
 		RealityDest: in.RealityDest,
 		ShortID:     in.ShortID,
 		PublicKey:   in.PublicKey,
+		PrivateKey:  in.PrivateKey,
 		Enable:      true,
 		Settings:    string(settings),
 		Stream:      string(stream),
@@ -239,6 +261,7 @@ func (s *SQLiteStore) UpdateInbound(id int64, in model.Inbound) (model.Inbound, 
 	row.RealityDest = in.RealityDest
 	row.ShortID = in.ShortID
 	row.PublicKey = in.PublicKey
+	row.PrivateKey = in.PrivateKey
 	row.Settings = string(settings)
 	row.Stream = string(stream)
 	if err := s.db.Save(&row).Error; err != nil {

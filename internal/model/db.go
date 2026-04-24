@@ -20,6 +20,7 @@ type InboundDB struct {
 	RealityDest string    `json:"realityDest"`
 	ShortID     string    `json:"shortId"`
 	PublicKey   string    `json:"publicKey"`
+	PrivateKey  string    `json:"privateKey"`
 	Enable      bool      `json:"enable"`
 	Settings    string    `json:"settings"`
 	Stream      string    `json:"streamSettings"`
