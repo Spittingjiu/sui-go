@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -343,7 +344,7 @@ func (a *App) handleInboundSub(w http.ResponseWriter, r *http.Request) {
 				a.writeErr(w, http.StatusNotFound, "not found")
 				return
 			}
-			a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": buildLinks(in)})
+			a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": buildLinks(in, r)})
 			return
 		case "qr":
 			if r.Method != http.MethodGet {
@@ -359,7 +360,7 @@ func (a *App) handleInboundSub(w http.ResponseWriter, r *http.Request) {
 				a.writeErr(w, http.StatusNotFound, "not found")
 				return
 			}
-			links := buildLinks(in)
+			links := buildLinks(in, r)
 			qr := ""
 			if len(links) > 0 {
 				qr = links[0]
@@ -565,8 +566,75 @@ func (a *App) checkAuth(r *http.Request) bool {
 	return ok
 }
 
-func buildLinks(in model.Inbound) []string {
-	host := "127.0.0.1"
+func isLoopbackOrLocalHost(host string) bool {
+	h := strings.TrimSpace(strings.ToLower(host))
+	if h == "" || h == "localhost" || h == "127.0.0.1" || h == "::1" || h == "[::1]" {
+		return true
+	}
+	ip := net.ParseIP(strings.Trim(h, "[]"))
+	return ip != nil && ip.IsLoopback()
+}
+
+func stripHostPort(raw string) string {
+	h := strings.TrimSpace(raw)
+	if h == "" {
+		return ""
+	}
+	if strings.Contains(h, ",") {
+		h = strings.TrimSpace(strings.SplitN(h, ",", 2)[0])
+	}
+	if strings.HasPrefix(h, "[") && strings.Contains(h, "]") {
+		if host, _, err := net.SplitHostPort(h); err == nil {
+			return strings.Trim(host, "[]")
+		}
+		return strings.Trim(h, "[]")
+	}
+	if strings.Count(h, ":") == 1 {
+		if host, _, err := net.SplitHostPort(h); err == nil {
+			return host
+		}
+	}
+	return h
+}
+
+func detectLocalIPv4() string {
+	conn, err := net.Dial("udp", "8.8.8.8:80")
+	if err != nil {
+		return ""
+	}
+	defer conn.Close()
+	if ua, ok := conn.LocalAddr().(*net.UDPAddr); ok && ua.IP != nil {
+		ip := ua.IP.String()
+		if strings.Count(ip, ":") == 0 {
+			return ip
+		}
+	}
+	return ""
+}
+
+func resolveLinkHost(r *http.Request) string {
+	if env := strings.TrimSpace(os.Getenv("SUI_PUBLIC_HOST")); env != "" {
+		return stripHostPort(env)
+	}
+	candidates := []string{
+		r.Header.Get("X-Forwarded-Host"),
+		r.Header.Get("X-Original-Host"),
+		r.Host,
+	}
+	for _, c := range candidates {
+		h := stripHostPort(c)
+		if h != "" && !isLoopbackOrLocalHost(h) {
+			return h
+		}
+	}
+	if ip := detectLocalIPv4(); ip != "" {
+		return ip
+	}
+	return "127.0.0.1"
+}
+
+func buildLinks(in model.Inbound, r *http.Request) []string {
+	host := resolveLinkHost(r)
 	name := in.Remark
 	if name == "" {
 		name = fmt.Sprintf("inbound-%d", time.Now().Unix())
