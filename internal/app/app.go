@@ -8,6 +8,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -17,11 +20,13 @@ import (
 )
 
 type Config struct {
-	Addr      string
-	DataFile  string
-	DBFile    string
-	PanelUser string
-	PanelPass string
+	Addr          string
+	DataFile      string
+	DBFile        string
+	PanelUser     string
+	PanelPass     string
+	XrayConfigOut string
+	XrayReloadCmd string
 }
 
 type App struct {
@@ -31,6 +36,12 @@ type App struct {
 }
 
 func New(cfg Config) (*App, error) {
+	if cfg.XrayConfigOut == "" {
+		cfg.XrayConfigOut = "data/xray-config.json"
+	}
+	if cfg.XrayReloadCmd == "" {
+		cfg.XrayReloadCmd = ""
+	}
 	st, err := store.NewSQLite(cfg.DBFile)
 	if err != nil {
 		return nil, err
@@ -62,6 +73,8 @@ func (a *App) routes() {
 	a.mux.HandleFunc("/api/inbounds/add", a.handleAddInbound)
 	a.mux.HandleFunc("/api/inbounds/", a.handleInboundSub)
 	a.mux.HandleFunc("/api/xray/config", a.handleXrayConfig)
+	a.mux.HandleFunc("/api/xray/export", a.handleXrayExport)
+	a.mux.HandleFunc("/api/xray/apply", a.handleXrayApply)
 
 	// minimal web ui
 	a.mux.Handle("/", http.FileServer(http.Dir("public")))
@@ -602,19 +615,10 @@ func emptyDefault(v, d string) string {
 	return v
 }
 
-func (a *App) handleXrayConfig(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
-		return
-	}
-	if !a.checkAuth(r) {
-		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
-		return
-	}
+func (a *App) buildXrayConfig() (map[string]any, error) {
 	rows, err := a.store.ListInbounds()
 	if err != nil {
-		a.writeErr(w, http.StatusInternalServerError, err.Error())
-		return
+		return nil, err
 	}
 	inbounds := make([]map[string]any, 0, len(rows))
 	for _, in := range rows {
@@ -644,7 +648,94 @@ func (a *App) handleXrayConfig(w http.ResponseWriter, r *http.Request) {
 		"inbounds":  inbounds,
 		"outbounds": []map[string]any{{"protocol": "freedom", "tag": "direct"}, {"protocol": "blackhole", "tag": "block"}},
 	}
+	return cfg, nil
+}
+
+func (a *App) handleXrayConfig(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !a.checkAuth(r) {
+		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	cfg, err := a.buildXrayConfig()
+	if err != nil {
+		a.writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": cfg})
+}
+
+func (a *App) handleXrayExport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !a.checkAuth(r) {
+		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	cfg, err := a.buildXrayConfig()
+	if err != nil {
+		a.writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	b, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		a.writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(a.cfg.XrayConfigOut), 0o755); err != nil {
+		a.writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := os.WriteFile(a.cfg.XrayConfigOut, b, 0o644); err != nil {
+		a.writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "path": a.cfg.XrayConfigOut, "bytes": len(b)})
+}
+
+func (a *App) handleXrayApply(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !a.checkAuth(r) {
+		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	cfg, err := a.buildXrayConfig()
+	if err != nil {
+		a.writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	b, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		a.writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(a.cfg.XrayConfigOut), 0o755); err != nil {
+		a.writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := os.WriteFile(a.cfg.XrayConfigOut, b, 0o644); err != nil {
+		a.writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if strings.TrimSpace(a.cfg.XrayReloadCmd) == "" {
+		a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "path": a.cfg.XrayConfigOut, "applied": false, "msg": "reload command not configured"})
+		return
+	}
+	cmd := exec.Command("bash", "-lc", a.cfg.XrayReloadCmd)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		a.writeJSON(w, http.StatusOK, map[string]any{"success": false, "path": a.cfg.XrayConfigOut, "applied": false, "error": err.Error(), "output": string(out)})
+		return
+	}
+	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "path": a.cfg.XrayConfigOut, "applied": true, "output": string(out)})
 }
 
 func (a *App) writeErr(w http.ResponseWriter, code int, msg string) {

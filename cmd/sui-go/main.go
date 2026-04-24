@@ -18,10 +18,12 @@ func main() {
 	}
 
 	a, err := app.New(app.Config{
-		Addr:      addr,
-		DBFile:    dbFile,
-		PanelUser: os.Getenv("PANEL_USER"),
-		PanelPass: os.Getenv("PANEL_PASS"),
+		Addr:          addr,
+		DBFile:        dbFile,
+		PanelUser:     os.Getenv("PANEL_USER"),
+		PanelPass:     os.Getenv("PANEL_PASS"),
+		XrayConfigOut: os.Getenv("XRAY_CONFIG_OUT"),
+		XrayReloadCmd: os.Getenv("XRAY_RELOAD_CMD"),
 	})
 	if err != nil {
 		log.Fatal(err)

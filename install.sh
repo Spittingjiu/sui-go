@@ -46,6 +46,9 @@ ADDR=:8811
 DB_FILE=/opt/sui-go/data/sui-go.db
 PANEL_USER=admin
 PANEL_PASS=admin123
+XRAY_CONFIG_OUT=/usr/local/x-ui/bin/config.json
+# 示例：XRAY_RELOAD_CMD=systemctl restart x-ui
+XRAY_RELOAD_CMD=
 EOF
   fi
 }

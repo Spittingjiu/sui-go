@@ -79,6 +79,16 @@
     <pre id="linkOut"></pre>
   </div>
 
+  <div class="card">
+    <h3>4) Xray 配置</h3>
+    <div class="row">
+      <button id="cfgShow">查看配置(JSON)</button>
+      <button id="cfgExport">导出到文件</button>
+      <button id="cfgApply">导出并执行 Reload</button>
+    </div>
+    <pre id="cfgOut"></pre>
+  </div>
+
 <script>
 let token = localStorage.getItem('sui_go_token') || '';
 const $ = id => document.getElementById(id);
@@ -238,10 +248,34 @@ async function loadLinks(id){
 $('login').onclick=doLogin;
 $('refresh').onclick=doRefresh;
 $('logout').onclick=doLogout;
+async function showCfg(){
+  try{
+    const j=await api('/api/xray/config');
+    $('cfgOut').textContent=JSON.stringify(j.obj||{}, null, 2);
+  }catch(e){ $('cfgOut').textContent='读取配置失败: '+e.message; }
+}
+
+async function exportCfg(){
+  try{
+    const j=await api('/api/xray/export',{method:'POST'});
+    $('cfgOut').textContent=JSON.stringify(j,null,2);
+  }catch(e){ $('cfgOut').textContent='导出失败: '+e.message; }
+}
+
+async function applyCfg(){
+  try{
+    const j=await api('/api/xray/apply',{method:'POST'});
+    $('cfgOut').textContent=JSON.stringify(j,null,2);
+  }catch(e){ $('cfgOut').textContent='应用失败: '+e.message; }
+}
+
 $('add').onclick=addHy2;
 $('save').onclick=saveHy2;
 $('reset').onclick=resetForm;
 $('load').onclick=loadList;
+$('cfgShow').onclick=showCfg;
+$('cfgExport').onclick=exportCfg;
+$('cfgApply').onclick=applyCfg;
 
 window.pickInbound = pickInbound;
 window.removeInbound = removeInbound;
