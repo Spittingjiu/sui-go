@@ -134,11 +134,153 @@ func (a *App) handleAddInbound(w http.ResponseWriter, r *http.Request) {
 		a.writeErr(w, http.StatusBadRequest, "invalid json")
 		return
 	}
-	if req.Port <= 0 || req.Protocol == "" {
-		a.writeErr(w, http.StatusBadRequest, "port/protocol required")
+	in, err := buildInboundFromReq(req)
+	if err != nil {
+		a.writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	created, err := a.store.AddInbound(in)
+	if err != nil {
+		a.writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": created})
+}
+
+func (a *App) handleInboundSub(w http.ResponseWriter, r *http.Request) {
+	if !a.checkAuth(r) {
+		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	path := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/inbounds/"), "/")
+	parts := strings.Split(path, "/")
+	if len(parts) == 0 || parts[0] == "" {
+		a.writeErr(w, http.StatusNotFound, "not found")
+		return
+	}
+	id, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil {
+		a.writeErr(w, http.StatusBadRequest, "invalid id")
 		return
 	}
 
+	if len(parts) == 1 {
+		switch r.Method {
+		case http.MethodGet:
+			in, ok, err := a.store.GetInbound(id)
+			if err != nil {
+				a.writeErr(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			if !ok {
+				a.writeErr(w, http.StatusNotFound, "not found")
+				return
+			}
+			a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": in})
+		case http.MethodPut:
+			var req model.AddInboundRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				a.writeErr(w, http.StatusBadRequest, "invalid json")
+				return
+			}
+			in, err := buildInboundFromReq(req)
+			if err != nil {
+				a.writeErr(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			updated, ok, err := a.store.UpdateInbound(id, in)
+			if err != nil {
+				a.writeErr(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			if !ok {
+				a.writeErr(w, http.StatusNotFound, "not found")
+				return
+			}
+			a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": updated})
+		case http.MethodDelete:
+			ok, err := a.store.DeleteInbound(id)
+			if err != nil {
+				a.writeErr(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			if !ok {
+				a.writeErr(w, http.StatusNotFound, "not found")
+				return
+			}
+			a.writeJSON(w, http.StatusOK, map[string]any{"success": true})
+		default:
+			a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+		}
+		return
+	}
+
+	if len(parts) == 2 {
+		switch parts[1] {
+		case "links":
+			if r.Method != http.MethodGet {
+				a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+				return
+			}
+			in, ok, err := a.store.GetInbound(id)
+			if err != nil {
+				a.writeErr(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			if !ok {
+				a.writeErr(w, http.StatusNotFound, "not found")
+				return
+			}
+			a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": buildLinks(in)})
+			return
+		case "full":
+			switch r.Method {
+			case http.MethodGet:
+				in, ok, err := a.store.GetInbound(id)
+				if err != nil {
+					a.writeErr(w, http.StatusInternalServerError, err.Error())
+					return
+				}
+				if !ok {
+					a.writeErr(w, http.StatusNotFound, "not found")
+					return
+				}
+				a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": in})
+			case http.MethodPut:
+				var req model.AddInboundRequest
+				if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+					a.writeErr(w, http.StatusBadRequest, "invalid json")
+					return
+				}
+				in, err := buildInboundFromReq(req)
+				if err != nil {
+					a.writeErr(w, http.StatusBadRequest, err.Error())
+					return
+				}
+				updated, ok, err := a.store.UpdateInbound(id, in)
+				if err != nil {
+					a.writeErr(w, http.StatusInternalServerError, err.Error())
+					return
+				}
+				if !ok {
+					a.writeErr(w, http.StatusNotFound, "not found")
+					return
+				}
+				a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": updated})
+			default:
+				a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+			}
+			return
+		}
+	}
+
+	a.writeErr(w, http.StatusNotFound, "not found")
+}
+
+func buildInboundFromReq(req model.AddInboundRequest) (model.Inbound, error) {
+	if req.Port <= 0 || req.Protocol == "" {
+		return model.Inbound{}, fmt.Errorf("port/protocol required")
+	}
 	in := model.Inbound{
 		Remark:   req.Remark,
 		Port:     req.Port,
@@ -184,50 +326,16 @@ func (a *App) handleAddInbound(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-
-	created, err := a.store.AddInbound(in)
-	if err != nil {
-		a.writeErr(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": created})
-}
-
-func (a *App) handleInboundSub(w http.ResponseWriter, r *http.Request) {
-	if !a.checkAuth(r) {
-		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
-		return
-	}
-	// /api/inbounds/:id/links
-	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/inbounds/"), "/")
-	if len(parts) != 2 || parts[1] != "links" {
-		a.writeErr(w, http.StatusNotFound, "not found")
-		return
-	}
-	id, err := strconv.ParseInt(parts[0], 10, 64)
-	if err != nil {
-		a.writeErr(w, http.StatusBadRequest, "invalid id")
-		return
-	}
-	in, ok, err := a.store.GetInbound(id)
-	if err != nil {
-		a.writeErr(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if !ok {
-		a.writeErr(w, http.StatusNotFound, "not found")
-		return
-	}
-	links := buildLinks(in)
-	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": links})
+	return in, nil
 }
 
 func (a *App) checkAuth(r *http.Request) bool {
 	h := strings.TrimSpace(r.Header.Get("Authorization"))
-	if !strings.HasPrefix(strings.ToLower(h), "bearer ") {
+	parts := strings.Fields(h)
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
 		return false
 	}
-	tok := strings.TrimSpace(h[len("Bearer "):])
+	tok := strings.TrimSpace(parts[1])
 	a.tokMu.RLock()
 	_, ok := a.tokens[tok]
 	a.tokMu.RUnlock()

@@ -138,3 +138,37 @@ func (s *SQLiteStore) AddInbound(in model.Inbound) (model.Inbound, error) {
 	in.UpdateUnix = row.UpdatedAt.Unix()
 	return in, nil
 }
+
+func (s *SQLiteStore) UpdateInbound(id int64, in model.Inbound) (model.Inbound, bool, error) {
+	var row model.InboundDB
+	if err := s.db.First(&row, id).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return model.Inbound{}, false, nil
+		}
+		return model.Inbound{}, false, err
+	}
+	settings, _ := json.Marshal(in.Settings)
+	stream, _ := json.Marshal(in.Stream)
+	row.Remark = in.Remark
+	row.Port = in.Port
+	row.Protocol = in.Protocol
+	row.Password = in.Password
+	row.Network = in.Network
+	row.Security = in.Security
+	row.SNI = in.SNI
+	row.Settings = string(settings)
+	row.Stream = string(stream)
+	if err := s.db.Save(&row).Error; err != nil {
+		return model.Inbound{}, false, err
+	}
+	got, ok, err := s.GetInbound(id)
+	return got, ok, err
+}
+
+func (s *SQLiteStore) DeleteInbound(id int64) (bool, error) {
+	res := s.db.Delete(&model.InboundDB{}, id)
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected > 0, nil
+}
