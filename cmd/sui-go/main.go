@@ -10,7 +10,7 @@ import (
 func main() {
 	addr := os.Getenv("ADDR")
 	if addr == "" {
-		addr = ":8811"
+		addr = ":18811"
 	}
 	dbFile := os.Getenv("DB_FILE")
 	if dbFile == "" {

@@ -22,9 +22,9 @@ Go 版本的 SUI（对标 s-ui 的 Go 架构方向），用于逐步替换现有
 - 运行：
   - `go run ./cmd/sui-go`
 - 默认监听：
-  - `:8811`
+  - `:18811`
 - 可用环境变量：
-  - `ADDR`（默认 `:8811`）
+  - `ADDR`（默认 `:18811`）
   - `DB_FILE`（默认 `data/sui-go.db`）
   - `PANEL_USER`（默认 `admin`）
   - `PANEL_PASS`（默认 `admin123`）

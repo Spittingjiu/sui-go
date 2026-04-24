@@ -42,7 +42,7 @@ build_bin() {
 write_env() {
   if [[ ! -f "$ENV_PATH" ]]; then
     cat > "$ENV_PATH" <<'EOF'
-ADDR=:8811
+ADDR=:18811
 DB_FILE=/opt/sui-go/data/sui-go.db
 PANEL_USER=admin
 PANEL_PASS=admin123
@@ -90,7 +90,7 @@ main() {
   echo "安装完成。"
   echo "服务: systemctl status sui-go"
   echo "环境配置: $ENV_PATH"
-  echo "默认地址: http://<IP>:8811"
+  echo "默认地址: http://<IP>:18811"
 }
 
 main "$@"
