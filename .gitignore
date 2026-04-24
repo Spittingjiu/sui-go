@@ -1,0 +1,9 @@
+# build
+sui-go
+
+# runtime data
+data/*.db
+data/*.sqlite
+
+# logs
+*.log
