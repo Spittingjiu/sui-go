@@ -645,18 +645,27 @@ func buildLinks(in model.Inbound, r *http.Request) []string {
 		if in.SNI != "" {
 			query.Set("sni", in.SNI)
 		}
+		query.Set("insecure", "1")
+		portPart := strconv.Itoa(in.Port)
 		if hs, ok := in.Stream["hysteriaSettings"].(map[string]any); ok {
+			if obfs, ok := hs["obfs"].(string); ok && strings.TrimSpace(obfs) != "" {
+				query.Set("obfs", strings.TrimSpace(obfs))
+			}
+			if obfsPwd, ok := hs["obfsPassword"].(string); ok && strings.TrimSpace(obfsPwd) != "" {
+				query.Set("obfs-password", strings.TrimSpace(obfsPwd))
+			}
 			if hop, ok := hs["udphop"].(map[string]any); ok {
 				if ports, ok := hop["ports"].(string); ok && strings.TrimSpace(ports) != "" {
-					query.Set("mport", ports)
-				}
-				if iv, ok := hop["interval"].(string); ok && strings.TrimSpace(iv) != "" {
-					query.Set("mportInterval", iv)
+					// Hysteria2 官方 URI：多端口写在 authority 的 port 部分
+					portPart = fmt.Sprintf("%d,%s", in.Port, strings.TrimSpace(ports))
 				}
 			}
 		}
-		query.Set("insecure", "1")
-		return []string{fmt.Sprintf("hy2://%s@%s:%d?%s#%s", url.QueryEscape(in.Password), host, in.Port, query.Encode(), url.QueryEscape(name))}
+		h := host
+		if strings.Contains(h, ":") && !strings.HasPrefix(h, "[") {
+			h = "[" + h + "]"
+		}
+		return []string{fmt.Sprintf("hy2://%s@%s:%s?%s#%s", url.QueryEscape(in.Password), h, portPart, query.Encode(), url.QueryEscape(name))}
 	case "vless":
 		q := url.Values{}
 		t := in.Network
