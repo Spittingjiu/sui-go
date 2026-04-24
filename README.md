@@ -10,6 +10,8 @@ Go 版本的 SUI（对标 s-ui 的 Go 架构方向），用于逐步替换现有
 - 认证接口 `POST /auth/login`（Bearer Token 访问受保护 API）
 - inbounds 接口：list/add/get/update/delete
 - 协议支持（当前）：hysteria(v2)/vless/vmess/trojan/shadowsocks
+- vless 细项（当前）：`network=xhttp`、`security=reality` 基础字段
+- xray 配置导出接口：`GET /api/xray/config`
 - full 接口兼容：`GET/PUT /api/inbounds/:id/full`
 - hysteria2(hy2) 入站创建/更新
 - hy2 UDP hop (`udphop`) 参数支持（`hy2HopPorts` / `hy2HopInterval`）
@@ -41,6 +43,7 @@ Go 版本的 SUI（对标 s-ui 的 Go 架构方向），用于逐步替换现有
 - `GET /api/inbounds/:id/full`（需 Bearer Token）
 - `PUT /api/inbounds/:id/full`（需 Bearer Token）
 - `GET /api/inbounds/:id/links`（需 Bearer Token）
+- `GET /api/xray/config`（需 Bearer Token）
 
 示例（新增 hy2 + 端口跳跃）：
 

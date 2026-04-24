@@ -50,7 +50,15 @@
       <input id="method" placeholder="ss method" value="aes-128-gcm" />
       <input id="net" placeholder="network(tcp/ws/hysteria)" value="hysteria" />
       <input id="host" placeholder="host(ws/http)" />
-      <input id="path" placeholder="path(ws)" />
+      <input id="path" placeholder="path(ws/xhttp)" />
+      <select id="sec">
+        <option value="">security(none)</option>
+        <option value="tls">tls</option>
+        <option value="reality">reality</option>
+      </select>
+      <input id="realityDest" placeholder="reality dest host:port" />
+      <input id="shortId" placeholder="reality shortId" />
+      <input id="publicKey" placeholder="reality publicKey" />
       <input id="sni" placeholder="sni" value="www.bing.com" />
       <input id="hopPorts" placeholder="hy2HopPorts" value="25000-25010" />
       <input id="hopInt" placeholder="hy2HopInterval" value="20-40" />
@@ -121,8 +129,12 @@ function getPayload(){
     password:$('pwd').value,
     method:$('method').value,
     network:$('net').value,
+    security:$('sec').value,
     host:$('host').value,
     path:$('path').value,
+    realityDest:$('realityDest').value,
+    shortId:$('shortId').value,
+    publicKey:$('publicKey').value,
     sni:$('sni').value,
     hy2HopPorts:$('hopPorts').value,
     hy2HopInterval:$('hopInt').value
@@ -138,8 +150,12 @@ function fillForm(x){
   $('pwd').value = x.password || '';
   $('method').value = x.method || 'aes-128-gcm';
   $('net').value = x.network || '';
+  $('sec').value = x.security || '';
   $('host').value = x.host || '';
   $('path').value = x.path || '';
+  $('realityDest').value = x.realityDest || '';
+  $('shortId').value = x.shortId || '';
+  $('publicKey').value = x.publicKey || '';
   $('sni').value = x.sni || '';
   const hop = (((x.streamSettings||{}).hysteriaSettings||{}).udphop)||{};
   $('hopPorts').value = hop.ports || '';
@@ -155,8 +171,12 @@ function resetForm(){
   $('pwd').value='abc123';
   $('method').value='aes-128-gcm';
   $('net').value='hysteria';
+  $('sec').value='';
   $('host').value='';
   $('path').value='';
+  $('realityDest').value='';
+  $('shortId').value='';
+  $('publicKey').value='';
   $('sni').value='www.bing.com';
   $('hopPorts').value='25000-25010';
   $('hopInt').value='20-40';

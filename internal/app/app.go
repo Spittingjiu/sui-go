@@ -61,6 +61,7 @@ func (a *App) routes() {
 	a.mux.HandleFunc("/api/inbounds", a.handleListInbounds)
 	a.mux.HandleFunc("/api/inbounds/add", a.handleAddInbound)
 	a.mux.HandleFunc("/api/inbounds/", a.handleInboundSub)
+	a.mux.HandleFunc("/api/xray/config", a.handleXrayConfig)
 
 	// minimal web ui
 	a.mux.Handle("/", http.FileServer(http.Dir("public")))
@@ -382,8 +383,29 @@ func buildInboundFromReq(req model.AddInboundRequest) (model.Inbound, error) {
 		if in.Network == "" {
 			in.Network = "tcp"
 		}
+		if in.Security == "" {
+			in.Security = "none"
+		}
 		in.Settings = map[string]any{"clients": []map[string]any{{"id": in.UUID, "email": in.Email, "flow": in.Flow}}, "decryption": "none"}
 		in.Stream = map[string]any{"network": in.Network, "security": in.Security}
+		if in.Network == "ws" {
+			in.Stream["wsSettings"] = map[string]any{"path": emptyDefault(in.Path, "/"), "headers": map[string]any{"Host": emptyDefault(in.Host, in.SNI)}}
+		}
+		if in.Network == "xhttp" {
+			in.Stream["xhttpSettings"] = map[string]any{"path": emptyDefault(in.Path, "/"), "host": emptyDefault(in.Host, in.SNI), "mode": "auto"}
+		}
+		if in.Security == "tls" {
+			in.Stream["tlsSettings"] = map[string]any{"serverName": emptyDefault(in.SNI, in.Host)}
+		}
+		if in.Security == "reality" {
+			in.Stream["realitySettings"] = map[string]any{
+				"show":        false,
+				"dest":        emptyDefault(in.RealityDest, "www.cloudflare.com:443"),
+				"serverNames": []string{emptyDefault(in.SNI, "www.cloudflare.com")},
+				"privateKey":  "",
+				"shortIds":    []string{in.ShortID},
+			}
+		}
 	case "vmess":
 		if in.Network == "" {
 			in.Network = "tcp"
@@ -476,6 +498,9 @@ func buildLinks(in model.Inbound) []string {
 		if in.Flow != "" {
 			q.Set("flow", in.Flow)
 		}
+		if t == "xhttp" {
+			q.Set("mode", "auto")
+		}
 		if in.Security == "reality" {
 			if in.PublicKey != "" {
 				q.Set("pbk", in.PublicKey)
@@ -483,6 +508,7 @@ func buildLinks(in model.Inbound) []string {
 			if in.ShortID != "" {
 				q.Set("sid", in.ShortID)
 			}
+			q.Set("fp", "chrome")
 		}
 		return []string{fmt.Sprintf("vless://%s@%s:%d?%s#%s", url.QueryEscape(in.UUID), host, in.Port, q.Encode(), url.QueryEscape(name))}
 	case "trojan":
@@ -567,6 +593,58 @@ func randomToken(bytes int) string {
 		return fmt.Sprintf("tok-%d", time.Now().UnixNano())
 	}
 	return hex.EncodeToString(buf)
+}
+
+func emptyDefault(v, d string) string {
+	if strings.TrimSpace(v) == "" {
+		return d
+	}
+	return v
+}
+
+func (a *App) handleXrayConfig(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !a.checkAuth(r) {
+		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	rows, err := a.store.ListInbounds()
+	if err != nil {
+		a.writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	inbounds := make([]map[string]any, 0, len(rows))
+	for _, in := range rows {
+		settings := in.Settings
+		stream := in.Stream
+		if settings == nil {
+			settings = map[string]any{}
+		}
+		if stream == nil {
+			stream = map[string]any{}
+		}
+		inbounds = append(inbounds, map[string]any{
+			"tag":            fmt.Sprintf("inbound-%d", in.ID),
+			"listen":         "0.0.0.0",
+			"port":           in.Port,
+			"protocol":       in.Protocol,
+			"settings":       settings,
+			"streamSettings": stream,
+			"sniffing": map[string]any{
+				"enabled":      true,
+				"destOverride": []string{"http", "tls", "quic"},
+			},
+		})
+	}
+	cfg := map[string]any{
+		"log":       map[string]any{"loglevel": "warning"},
+		"inbounds":  inbounds,
+		"outbounds": []map[string]any{{"protocol": "freedom", "tag": "direct"}, {"protocol": "blackhole", "tag": "block"}},
+	}
+	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": cfg})
 }
 
 func (a *App) writeErr(w http.ResponseWriter, code int, msg string) {
