@@ -6,17 +6,17 @@
   <title>sui-go Panel</title>
   <style>
     :root{
-      --bg:#0b1020;
-      --bg2:#121a31;
-      --card:rgba(20,28,52,.72);
-      --line:rgba(255,255,255,.12);
-      --text:#e8ecff;
-      --muted:#9da9d2;
+      --bg:#0a0f1f;
+      --bg2:#121a2f;
+      --card:rgba(19,28,52,.72);
+      --line:rgba(255,255,255,.10);
+      --text:#e7edff;
+      --muted:#9aa7cf;
       --pri:#6ea8fe;
       --ok:#34d399;
       --err:#f87171;
       --warn:#fbbf24;
-      --shadow:0 20px 50px rgba(0,0,0,.38);
+      --shadow:0 20px 45px rgba(0,0,0,.38);
     }
     *{box-sizing:border-box}
     body{
@@ -24,163 +24,127 @@
       font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
       color:var(--text);
       background:
-        radial-gradient(1200px 500px at 20% -10%, #243056 0%, transparent 60%),
-        radial-gradient(1000px 500px at 100% 0%, #1f3650 0%, transparent 55%),
-        linear-gradient(180deg,var(--bg) 0%, var(--bg2) 100%);
+        radial-gradient(1200px 600px at 15% -10%, #223760 0%, transparent 58%),
+        radial-gradient(900px 500px at 100% 0%, #173149 0%, transparent 52%),
+        linear-gradient(180deg,var(--bg),var(--bg2));
       min-height:100vh;
-      padding:28px 14px;
     }
-    .wrap{max-width:1220px;margin:0 auto}
+    .shell{max-width:1360px;margin:0 auto;padding:16px}
     .topbar{
-      display:flex;align-items:center;justify-content:space-between;gap:12px;
-      margin-bottom:14px;
-    }
-    .brand{display:flex;gap:10px;align-items:center}
-    .logo{
-      width:34px;height:34px;border-radius:10px;
-      background:linear-gradient(145deg,#7aa2ff,#58d1ff);
-      box-shadow:0 8px 24px rgba(110,168,254,.45);
-    }
-    h1{margin:0;font-size:20px;letter-spacing:.2px}
-    .sub{font-size:12px;color:var(--muted)}
-
-    .status-pill{
-      border:1px solid var(--line);
-      background:rgba(255,255,255,.05);
-      color:var(--muted);
-      border-radius:999px;
-      padding:7px 12px;
-      font-size:12px;
-    }
-
-    .grid{display:grid;grid-template-columns:1fr;gap:12px}
-    @media (min-width:1080px){
-      .grid{grid-template-columns:1.15fr .85fr}
-    }
-
-    .card{
+      height:60px;
       border:1px solid var(--line);
       background:var(--card);
       backdrop-filter: blur(14px);
-      -webkit-backdrop-filter: blur(14px);
-      border-radius:16px;
+      border-radius:14px;
       box-shadow:var(--shadow);
-      padding:14px;
+      display:flex;align-items:center;justify-content:space-between;
+      padding:0 14px;
+      margin-bottom:12px;
     }
-    .card h3{margin:2px 0 12px 0;font-size:14px;letter-spacing:.2px;color:#dce4ff}
+    .brand{display:flex;gap:10px;align-items:center}
+    .logo{width:34px;height:34px;border-radius:10px;background:linear-gradient(145deg,#7aa2ff,#58d1ff);box-shadow:0 8px 24px rgba(110,168,254,.4)}
+    .brand h1{margin:0;font-size:18px}
+    .brand .sub{font-size:12px;color:var(--muted)}
+    .status-pill{font-size:12px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:6px 12px;background:rgba(255,255,255,.04)}
+
+    .layout{display:grid;grid-template-columns:220px 1fr;gap:12px}
+    @media (max-width:1080px){.layout{grid-template-columns:1fr}}
+
+    .side,.main-card,.card{border:1px solid var(--line);background:var(--card);backdrop-filter: blur(14px);border-radius:14px;box-shadow:var(--shadow)}
+    .side{padding:10px;position:sticky;top:12px;height:max-content}
+    .nav-title{font-size:11px;color:var(--muted);margin:4px 8px 8px}
+    .nav-btn{
+      width:100%;height:36px;border:1px solid transparent;background:transparent;color:#dce5ff;border-radius:10px;text-align:left;padding:0 10px;font-size:13px;cursor:pointer
+    }
+    .nav-btn:hover{background:rgba(255,255,255,.05)}
+    .nav-btn.active{background:rgba(110,168,254,.18);border-color:rgba(110,168,254,.45)}
+
+    .main{display:grid;gap:12px}
+    .stats{display:grid;grid-template-columns:repeat(4,minmax(120px,1fr));gap:10px}
+    @media (max-width:980px){.stats{grid-template-columns:repeat(2,minmax(120px,1fr))}}
+    .stat{padding:12px;border:1px solid var(--line);border-radius:12px;background:rgba(255,255,255,.03)}
+    .stat .k{font-size:12px;color:var(--muted)}
+    .stat .v{margin-top:4px;font-size:22px;font-weight:700}
+
+    .main-card{padding:12px}
+    .card{padding:12px}
+    h3{margin:0 0 10px;font-size:14px;color:#dce4ff}
 
     .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-    .row.tight{gap:6px}
-
+    .row + .row{margin-top:8px}
     input,select,button{
-      border-radius:10px;
-      border:1px solid var(--line);
-      background:rgba(8,12,24,.5);
-      color:var(--text);
-      height:36px;
-      padding:0 11px;
-      font-size:13px;
-      outline:none;
-      transition:.18s ease;
+      border-radius:10px;border:1px solid var(--line);background:rgba(9,14,28,.58);color:var(--text);height:36px;padding:0 10px;font-size:13px;outline:none
     }
     input::placeholder{color:#8fa0cf}
-    input:focus,select:focus{
-      border-color:rgba(110,168,254,.6);
-      box-shadow:0 0 0 3px rgba(110,168,254,.18);
-    }
+    input:focus,select:focus{border-color:rgba(110,168,254,.7);box-shadow:0 0 0 3px rgba(110,168,254,.16)}
+    button{cursor:pointer;background:linear-gradient(180deg,rgba(110,168,254,.28),rgba(88,130,222,.2));border-color:rgba(110,168,254,.45);font-weight:600}
+    button:hover{transform:translateY(-1px);filter:brightness(1.04)}
+    button.ghost{background:rgba(255,255,255,.04);border-color:var(--line);font-weight:500}
+    button.danger{background:linear-gradient(180deg,rgba(248,113,113,.36),rgba(220,38,38,.26));border-color:rgba(248,113,113,.55)}
 
-    button{
-      cursor:pointer;
-      background:linear-gradient(180deg,rgba(110,168,254,.28),rgba(88,130,222,.2));
-      border-color:rgba(110,168,254,.45);
-      color:#ecf3ff;
-      font-weight:600;
-    }
-    button:hover{transform:translateY(-1px);filter:brightness(1.06)}
-    button.ghost{
-      background:rgba(255,255,255,.04);
-      border-color:var(--line);
-      color:#d7def8;
-      font-weight:500;
-    }
-    button.danger{
-      background:linear-gradient(180deg,rgba(248,113,113,.35),rgba(220,38,38,.26));
-      border-color:rgba(248,113,113,.55);
-    }
-
-    .w-sm{width:120px}
-    .w-md{width:160px}
-    .w-lg{width:220px}
-
-    .ok{color:var(--ok)}
-    .err{color:var(--err)}
-
-    .muted{font-size:12px;color:var(--muted)}
+    .w-sm{width:120px}.w-md{width:160px}.w-lg{width:220px}.w-xl{width:280px}
 
     table{width:100%;border-collapse:separate;border-spacing:0}
-    th,td{
-      border-bottom:1px solid rgba(255,255,255,.08);
-      padding:10px 8px;
-      text-align:left;
-      font-size:13px;
-      vertical-align:middle;
-    }
-    th{color:#b8c4ea;font-weight:600;background:rgba(255,255,255,.02)}
+    th,td{padding:10px 8px;border-bottom:1px solid rgba(255,255,255,.08);text-align:left;font-size:13px;vertical-align:middle}
+    th{color:#b7c4ea;font-weight:600;background:rgba(255,255,255,.02)}
     tr:hover td{background:rgba(255,255,255,.02)}
-
-    .tag{
-      display:inline-block;padding:2px 8px;border-radius:999px;
-      border:1px solid rgba(110,168,254,.35);
-      color:#cfe0ff;background:rgba(110,168,254,.12);
-      font-size:11px;
-    }
-
+    .tag{display:inline-block;border:1px solid rgba(110,168,254,.4);background:rgba(110,168,254,.12);padding:2px 8px;border-radius:999px;font-size:11px}
     .ops{display:flex;gap:6px;flex-wrap:wrap}
     .ops button{height:30px;padding:0 9px;font-size:12px}
 
+    .muted{font-size:12px;color:var(--muted)}
+    .hidden{display:none !important}
+    .ok{color:var(--ok)}
+    .err{color:var(--err)}
     pre{
-      margin:10px 0 0;
-      white-space:pre-wrap;
-      word-break:break-word;
-      background:rgba(2,8,20,.58);
-      border:1px solid rgba(255,255,255,.1);
-      border-radius:12px;
-      padding:10px 12px;
-      color:#cdd8ff;
-      max-height:280px;
-      overflow:auto;
-      font-size:12px;
-      line-height:1.55;
+      margin:10px 0 0;white-space:pre-wrap;word-break:break-word;
+      background:rgba(2,8,20,.56);border:1px solid rgba(255,255,255,.1);
+      border-radius:12px;padding:10px 12px;color:#cdd8ff;max-height:300px;overflow:auto;font-size:12px;line-height:1.55
     }
   </style>
 </head>
 <body>
-  <div class="wrap">
+  <div class="shell">
     <div class="topbar">
       <div class="brand">
         <div class="logo"></div>
         <div>
           <h1>sui-go 控制台</h1>
-          <div class="sub">简洁高端风 · 对标 s-ui 操作流</div>
+          <div class="sub">s-ui 风格：简洁、清晰、可快速操作</div>
         </div>
       </div>
       <div id="loginStatus" class="status-pill">未登录</div>
     </div>
 
-    <div class="grid">
-      <div>
-        <div class="card">
-          <h3>账号会话</h3>
-          <div class="row tight">
+    <div class="layout">
+      <aside class="side">
+        <div class="nav-title">导航</div>
+        <button class="nav-btn active" data-target="sec-dashboard">总览</button>
+        <button class="nav-btn" data-target="sec-editor">Inbound 编辑</button>
+        <button class="nav-btn" data-target="sec-list">Inbound 列表</button>
+        <button class="nav-btn" data-target="sec-xray">Xray 工作台</button>
+      </aside>
+
+      <main class="main">
+        <section id="sec-dashboard" class="main-card">
+          <h3>系统总览</h3>
+          <div class="row">
             <input id="u" class="w-md" placeholder="username" value="admin" />
             <input id="p" class="w-md" placeholder="password" type="password" value="admin123" />
             <button id="login">登录</button>
             <button id="refresh" class="ghost">刷新 token</button>
             <button id="logout" class="ghost">退出</button>
+            <button id="load" class="ghost">刷新数据</button>
           </div>
-        </div>
+          <div class="stats" style="margin-top:10px">
+            <div class="stat"><div class="k">Inbound 总数</div><div class="v" id="stTotal">0</div></div>
+            <div class="stat"><div class="k">启用数量</div><div class="v" id="stEnabled">0</div></div>
+            <div class="stat"><div class="k">禁用数量</div><div class="v" id="stDisabled">0</div></div>
+            <div class="stat"><div class="k">协议数</div><div class="v" id="stProto">0</div></div>
+          </div>
+        </section>
 
-        <div class="card">
+        <section id="sec-editor" class="card hidden">
           <h3>Inbound 编辑器</h3>
           <div class="row">
             <input id="id" class="w-sm" placeholder="id" />
@@ -193,10 +157,12 @@
             </select>
             <input id="remark" class="w-lg" placeholder="remark" value="hy2-mvp" />
             <input id="port" class="w-sm" placeholder="port" value="24433" />
-            <input id="uuid" class="w-lg" placeholder="uuid(vless/vmess)" />
-            <input id="pwd" class="w-lg" placeholder="password(hy2/trojan/ss)" value="abc123" />
-            <input id="method" class="w-md" placeholder="ss method" value="aes-128-gcm" />
-            <input id="net" class="w-md" placeholder="network" value="hysteria" />
+            <input id="sni" class="w-md" placeholder="sni" value="www.bing.com" />
+          </div>
+
+          <div id="f-vless" class="row hidden">
+            <input id="uuid" class="w-xl" placeholder="uuid(vless/vmess)" />
+            <input id="net" class="w-md" placeholder="network(tcp/ws/xhttp)" value="tcp" />
             <select id="sec" class="w-md">
               <option value="">security (none)</option>
               <option value="tls">tls</option>
@@ -204,35 +170,47 @@
             </select>
             <input id="host" class="w-md" placeholder="host(ws/http)" />
             <input id="path" class="w-md" placeholder="path(ws/xhttp)" />
-            <input id="realityDest" class="w-lg" placeholder="reality dest host:port" />
-            <input id="shortId" class="w-md" placeholder="reality shortId" />
-            <input id="publicKey" class="w-lg" placeholder="reality publicKey" />
-            <input id="sni" class="w-md" placeholder="sni" value="www.bing.com" />
-            <input id="hopPorts" class="w-lg" placeholder="hy2HopPorts" value="25000-25010" />
-            <input id="hopInt" class="w-md" placeholder="hy2HopInterval" value="20-40" />
           </div>
-          <div class="row" style="margin-top:10px">
+
+          <div id="f-reality" class="row hidden">
+            <input id="realityDest" class="w-xl" placeholder="reality dest host:port" />
+            <input id="shortId" class="w-md" placeholder="reality shortId" />
+            <input id="publicKey" class="w-xl" placeholder="reality publicKey" />
+          </div>
+
+          <div id="f-secret" class="row">
+            <input id="pwd" class="w-xl" placeholder="password(hy2/trojan/ss)" value="abc123" />
+          </div>
+
+          <div id="f-ss" class="row hidden">
+            <input id="method" class="w-md" placeholder="ss method" value="aes-128-gcm" />
+          </div>
+
+          <div id="f-hy2" class="row">
+            <input id="hopPorts" class="w-xl" placeholder="hy2HopPorts" value="25000-25010" />
+            <input id="hopInt" class="w-md" placeholder="hy2HopInterval" value="20-40" />
+            <input id="hyNet" class="w-md" placeholder="network(hysteria)" value="hysteria" />
+          </div>
+
+          <div class="row">
             <button id="add">新增</button>
             <button id="save">保存 /full</button>
             <button id="reset" class="ghost">清空</button>
-            <div class="muted">提示：先在列表点“编辑”再保存。</div>
+            <div class="muted">按协议自动显示字段，减少误填。</div>
           </div>
           <pre id="addOut"></pre>
-        </div>
+        </section>
 
-        <div class="card">
+        <section id="sec-list" class="card hidden">
           <h3>Inbounds 列表</h3>
-          <div class="row"><button id="load" class="ghost">刷新列表</button></div>
           <table>
-            <thead><tr><th>ID</th><th>备注</th><th>协议</th><th>端口</th><th>操作</th></tr></thead>
+            <thead><tr><th>ID</th><th>备注</th><th>协议</th><th>端口</th><th>状态</th><th>操作</th></tr></thead>
             <tbody id="tb"></tbody>
           </table>
           <pre id="linkOut"></pre>
-        </div>
-      </div>
+        </section>
 
-      <div>
-        <div class="card">
+        <section id="sec-xray" class="card hidden">
           <h3>Xray 配置工作台</h3>
           <div class="row">
             <button id="cfgShow" class="ghost">查看配置 JSON</button>
@@ -240,14 +218,15 @@
             <button id="cfgApply">导出并 Reload</button>
           </div>
           <pre id="cfgOut"></pre>
-        </div>
-      </div>
+        </section>
+      </main>
     </div>
   </div>
 
 <script>
 let token = localStorage.getItem('sui_go_token') || '';
 const $ = id => document.getElementById(id);
+let cachedRows = [];
 
 async function api(url, opt={}){
   const h = Object.assign({'content-type':'application/json'}, opt.headers||{});
@@ -264,12 +243,41 @@ function setStatus(msg, ok=true){
   el.className='status-pill '+(ok?'ok':'err');
 }
 
+function switchSection(targetId){
+  ['sec-dashboard','sec-editor','sec-list','sec-xray'].forEach(id=>$(id).classList.add('hidden'));
+  $(targetId).classList.remove('hidden');
+  document.querySelectorAll('.nav-btn').forEach(btn=>btn.classList.remove('active'));
+  document.querySelector(`.nav-btn[data-target="${targetId}"]`)?.classList.add('active');
+}
+
+function syncStats(rows){
+  const total=rows.length;
+  const enabled=rows.filter(x=>x.enable!==false).length;
+  const disabled=total-enabled;
+  const proto=new Set(rows.map(x=>x.protocol||'')).size;
+  $('stTotal').textContent=String(total);
+  $('stEnabled').textContent=String(enabled);
+  $('stDisabled').textContent=String(disabled);
+  $('stProto').textContent=String(proto);
+}
+
+function updateFieldVisibility(){
+  const p = $('proto').value;
+  const sec = $('sec').value;
+  $('f-hy2').classList.toggle('hidden', p!=='hysteria');
+  $('f-vless').classList.toggle('hidden', !(p==='vless' || p==='vmess' || p==='trojan'));
+  $('f-ss').classList.toggle('hidden', p!=='shadowsocks');
+  $('f-secret').classList.toggle('hidden', !(p==='hysteria' || p==='trojan' || p==='shadowsocks'));
+  $('f-reality').classList.toggle('hidden', !(p==='vless' && sec==='reality'));
+}
+
 async function doLogin(){
   try{
     const j = await api('/auth/login', {method:'POST', body: JSON.stringify({username:$('u').value,password:$('p').value})});
     token = j.token || '';
     localStorage.setItem('sui_go_token', token);
     setStatus('已登录');
+    await loadList();
   }catch(e){ setStatus('登录失败: '+e.message, false); }
 }
 
@@ -289,14 +297,15 @@ async function doLogout(){
 }
 
 function getPayload(){
+  const proto=$('proto').value;
   return {
     remark:$('remark').value,
     port:Number($('port').value),
-    protocol:$('proto').value,
+    protocol:proto,
     uuid:$('uuid').value,
     password:$('pwd').value,
     method:$('method').value,
-    network:$('net').value,
+    network: proto==='hysteria' ? $('hyNet').value : $('net').value,
     security:$('sec').value,
     host:$('host').value,
     path:$('path').value,
@@ -317,7 +326,8 @@ function fillForm(x){
   $('uuid').value = x.uuid || '';
   $('pwd').value = x.password || '';
   $('method').value = x.method || 'aes-128-gcm';
-  $('net').value = x.network || '';
+  $('net').value = x.network || 'tcp';
+  $('hyNet').value = x.network || 'hysteria';
   $('sec').value = x.security || '';
   $('host').value = x.host || '';
   $('path').value = x.path || '';
@@ -328,6 +338,7 @@ function fillForm(x){
   const hop = (((x.streamSettings||{}).hysteriaSettings||{}).udphop)||{};
   $('hopPorts').value = hop.ports || '';
   $('hopInt').value = hop.interval || '';
+  updateFieldVisibility();
 }
 
 function resetForm(){
@@ -338,7 +349,8 @@ function resetForm(){
   $('uuid').value='';
   $('pwd').value='abc123';
   $('method').value='aes-128-gcm';
-  $('net').value='hysteria';
+  $('net').value='tcp';
+  $('hyNet').value='hysteria';
   $('sec').value='';
   $('host').value='';
   $('path').value='';
@@ -348,9 +360,10 @@ function resetForm(){
   $('sni').value='www.bing.com';
   $('hopPorts').value='25000-25010';
   $('hopInt').value='20-40';
+  updateFieldVisibility();
 }
 
-async function addHy2(){
+async function addInbound(){
   try{
     const j=await api('/api/inbounds/add',{method:'POST',body:JSON.stringify(getPayload())});
     $('addOut').textContent=JSON.stringify(j,null,2);
@@ -359,7 +372,7 @@ async function addHy2(){
   }catch(e){ $('addOut').textContent='新增失败: '+e.message; }
 }
 
-async function saveHy2(){
+async function saveInbound(){
   const id = Number($('id').value||0);
   if(!id){ $('addOut').textContent='请先选择一条记录再保存'; return; }
   try{
@@ -374,8 +387,10 @@ async function loadList(){
   try{
     const j=await api('/api/inbounds');
     const rows=j.obj||[];
-    $('tb').innerHTML = rows.map(x=>`<tr><td>${x.id}</td><td>${x.remark||''}</td><td><span class="tag">${x.protocol||''}</span></td><td>${x.port||''}</td><td><div class="ops"><button class="ghost" onclick="pickInbound(${x.id})">编辑</button><button class="danger" onclick="removeInbound(${x.id})">删除</button><button class="ghost" onclick="loadLinks(${x.id})">links</button></div></td></tr>`).join('');
-  }catch(e){ $('tb').innerHTML=`<tr><td colspan="5" class="err">${e.message}</td></tr>`; }
+    cachedRows=rows;
+    syncStats(rows);
+    $('tb').innerHTML = rows.map(x=>`<tr><td>${x.id}</td><td>${x.remark||''}</td><td><span class="tag">${x.protocol||''}</span></td><td>${x.port||''}</td><td>${x.enable===false?'<span class="err">禁用</span>':'<span class="ok">启用</span>'}</td><td><div class="ops"><button class="ghost" onclick="pickInbound(${x.id})">编辑</button><button class="danger" onclick="removeInbound(${x.id})">删除</button><button class="ghost" onclick="loadLinks(${x.id})">links</button></div></td></tr>`).join('');
+  }catch(e){ $('tb').innerHTML=`<tr><td colspan="6" class="err">${e.message}</td></tr>`; }
 }
 
 async function pickInbound(id){
@@ -383,6 +398,7 @@ async function pickInbound(id){
     const j=await api(`/api/inbounds/${id}/full`);
     fillForm(j.obj||{});
     $('addOut').textContent='已载入 ID='+id+'，可修改后点保存';
+    switchSection('sec-editor');
   }catch(e){ $('addOut').textContent='读取失败: '+e.message; }
 }
 
@@ -400,12 +416,9 @@ async function loadLinks(id){
   try{
     const j=await api(`/api/inbounds/${id}/links`);
     $('linkOut').textContent = (j.obj||[]).join('\n');
+    switchSection('sec-list');
   }catch(e){ $('linkOut').textContent='读取链接失败: '+e.message; }
 }
-
-$('login').onclick=doLogin;
-$('refresh').onclick=doRefresh;
-$('logout').onclick=doLogout;
 
 async function showCfg(){
   try{
@@ -428,19 +441,30 @@ async function applyCfg(){
   }catch(e){ $('cfgOut').textContent='应用失败: '+e.message; }
 }
 
-$('add').onclick=addHy2;
-$('save').onclick=saveHy2;
-$('reset').onclick=resetForm;
+$('login').onclick=doLogin;
+$('refresh').onclick=doRefresh;
+$('logout').onclick=doLogout;
 $('load').onclick=loadList;
+$('add').onclick=addInbound;
+$('save').onclick=saveInbound;
+$('reset').onclick=resetForm;
 $('cfgShow').onclick=showCfg;
 $('cfgExport').onclick=exportCfg;
 $('cfgApply').onclick=applyCfg;
+$('proto').onchange=updateFieldVisibility;
+$('sec').onchange=updateFieldVisibility;
+
+document.querySelectorAll('.nav-btn').forEach(btn=>btn.onclick=()=>switchSection(btn.dataset.target));
 
 window.pickInbound = pickInbound;
 window.removeInbound = removeInbound;
 window.loadLinks = loadLinks;
 
-if(token) setStatus('检测到本地 token，可直接操作');
+resetForm();
+if(token){
+  setStatus('检测到本地 token，可直接操作');
+  loadList();
+}
 </script>
 </body>
 </html>
