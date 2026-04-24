@@ -33,8 +33,9 @@
   </div>
 
   <div class="card">
-    <h3>2) 新增 HY2</h3>
+    <h3>2) HY2 新增 / 编辑</h3>
     <div class="row">
+      <input id="id" placeholder="id(编辑时自动填)" style="width:140px" />
       <input id="remark" placeholder="remark" value="hy2-mvp" />
       <input id="port" placeholder="port" value="24433" />
       <input id="pwd" placeholder="password" value="abc123" />
@@ -42,6 +43,8 @@
       <input id="hopPorts" placeholder="hy2HopPorts" value="25000-25010" />
       <input id="hopInt" placeholder="hy2HopInterval" value="20-40" />
       <button id="add">新增</button>
+      <button id="save">保存(PUT /full)</button>
+      <button id="reset">清空</button>
     </div>
     <pre id="addOut"></pre>
   </div>
@@ -97,29 +100,83 @@ async function doLogout(){
   setStatus('已退出');
 }
 
+function getPayload(){
+  return {
+    remark:$('remark').value,
+    port:Number($('port').value),
+    protocol:'hysteria',
+    password:$('pwd').value,
+    sni:$('sni').value,
+    hy2HopPorts:$('hopPorts').value,
+    hy2HopInterval:$('hopInt').value
+  };
+}
+
+function fillForm(x){
+  $('id').value = x.id || '';
+  $('remark').value = x.remark || '';
+  $('port').value = x.port || '';
+  $('pwd').value = x.password || '';
+  $('sni').value = x.sni || '';
+  const hop = (((x.streamSettings||{}).hysteriaSettings||{}).udphop)||{};
+  $('hopPorts').value = hop.ports || '';
+  $('hopInt').value = hop.interval || '';
+}
+
+function resetForm(){
+  $('id').value='';
+  $('remark').value='hy2-mvp';
+  $('port').value='24433';
+  $('pwd').value='abc123';
+  $('sni').value='www.bing.com';
+  $('hopPorts').value='25000-25010';
+  $('hopInt').value='20-40';
+}
+
 async function addHy2(){
   try{
-    const payload={
-      remark:$('remark').value,
-      port:Number($('port').value),
-      protocol:'hysteria',
-      password:$('pwd').value,
-      sni:$('sni').value,
-      hy2HopPorts:$('hopPorts').value,
-      hy2HopInterval:$('hopInt').value
-    };
-    const j=await api('/api/inbounds/add',{method:'POST',body:JSON.stringify(payload)});
+    const j=await api('/api/inbounds/add',{method:'POST',body:JSON.stringify(getPayload())});
     $('addOut').textContent=JSON.stringify(j,null,2);
+    fillForm(j.obj||{});
     await loadList();
   }catch(e){ $('addOut').textContent='新增失败: '+e.message; }
+}
+
+async function saveHy2(){
+  const id = Number($('id').value||0);
+  if(!id){ $('addOut').textContent='请先选择一条记录再保存'; return; }
+  try{
+    const j=await api(`/api/inbounds/${id}/full`,{method:'PUT',body:JSON.stringify(getPayload())});
+    $('addOut').textContent=JSON.stringify(j,null,2);
+    fillForm(j.obj||{});
+    await loadList();
+  }catch(e){ $('addOut').textContent='保存失败: '+e.message; }
 }
 
 async function loadList(){
   try{
     const j=await api('/api/inbounds');
     const rows=j.obj||[];
-    $('tb').innerHTML = rows.map(x=>`<tr><td>${x.id}</td><td>${x.remark||''}</td><td>${x.protocol||''}</td><td>${x.port||''}</td><td><button onclick="loadLinks(${x.id})">links</button></td></tr>`).join('');
+    $('tb').innerHTML = rows.map(x=>`<tr><td>${x.id}</td><td>${x.remark||''}</td><td>${x.protocol||''}</td><td>${x.port||''}</td><td><button onclick="pickInbound(${x.id})">编辑</button> <button onclick="removeInbound(${x.id})">删除</button> <button onclick="loadLinks(${x.id})">links</button></td></tr>`).join('');
   }catch(e){ $('tb').innerHTML=`<tr><td colspan="5" class="err">${e.message}</td></tr>`; }
+}
+
+async function pickInbound(id){
+  try{
+    const j=await api(`/api/inbounds/${id}/full`);
+    fillForm(j.obj||{});
+    $('addOut').textContent='已载入 ID='+id+'，可修改后点保存';
+  }catch(e){ $('addOut').textContent='读取失败: '+e.message; }
+}
+
+async function removeInbound(id){
+  if(!confirm('确认删除 ID='+id+' ?')) return;
+  try{
+    const j=await api(`/api/inbounds/${id}`, {method:'DELETE'});
+    $('addOut').textContent=JSON.stringify(j,null,2);
+    if(Number($('id').value||0)===id) resetForm();
+    await loadList();
+  }catch(e){ $('addOut').textContent='删除失败: '+e.message; }
 }
 
 async function loadLinks(id){
@@ -133,7 +190,13 @@ $('login').onclick=doLogin;
 $('refresh').onclick=doRefresh;
 $('logout').onclick=doLogout;
 $('add').onclick=addHy2;
+$('save').onclick=saveHy2;
+$('reset').onclick=resetForm;
 $('load').onclick=loadList;
+
+window.pickInbound = pickInbound;
+window.removeInbound = removeInbound;
+window.loadLinks = loadLinks;
 
 if(token) setStatus('检测到本地 token，可直接刷新列表');
 </script>
