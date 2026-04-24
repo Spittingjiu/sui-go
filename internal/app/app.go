@@ -97,6 +97,20 @@ func (a *App) routes() {
 	a.mux.HandleFunc("/api/panel/connect-sub", a.handlePanelConnectSub)
 
 	a.mux.HandleFunc("/api/system/status", a.handleSystemStatus)
+	a.mux.HandleFunc("/api/system/restart-panel", a.handleSystemRestartPanel)
+	a.mux.HandleFunc("/api/system/chain/test", a.handleSystemChainTest)
+	a.mux.HandleFunc("/api/system/restart-xray", a.handleSystemRestartXray)
+	a.mux.HandleFunc("/api/system/restart-xui", a.handleSystemRestartXUI)
+	a.mux.HandleFunc("/api/system/optimize/bbr", a.handleSystemOptimizeBBR)
+	a.mux.HandleFunc("/api/system/optimize/dns", a.handleSystemOptimizeDNS)
+	a.mux.HandleFunc("/api/system/optimize/sysctl", a.handleSystemOptimizeSysctl)
+	a.mux.HandleFunc("/api/system/optimize/all", a.handleSystemOptimizeAll)
+	a.mux.HandleFunc("/api/system/xray/version-current", a.handleSystemXrayVersionCurrent)
+	a.mux.HandleFunc("/api/system/xray/reality-gen", a.handleSystemXrayRealityGen)
+	a.mux.HandleFunc("/api/system/xray/config", a.handleSystemXrayConfig)
+	a.mux.HandleFunc("/api/system/xray/versions", a.handleSystemXrayVersions)
+	a.mux.HandleFunc("/api/system/xray/switch", a.handleSystemXraySwitch)
+
 	a.mux.HandleFunc("/api/view/bootstrap", a.handleViewBootstrap)
 
 	// minimal web ui
@@ -1169,6 +1183,182 @@ func (a *App) handleAddRealityQuick(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": obj})
+}
+
+func (a *App) runBestEffort(cmdStr string) (string, error) {
+	cmd := exec.Command("bash", "-lc", cmdStr)
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
+func (a *App) handleSystemRestartPanel(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !a.checkAuth(r) {
+		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	out, err := a.runBestEffort("systemctl restart sui-go || true")
+	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "output": out, "error": errString(err)})
+}
+
+func (a *App) handleSystemChainTest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !a.checkAuth(r) {
+		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": map[string]any{"chain": "ok"}})
+}
+
+func (a *App) handleSystemRestartXray(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !a.checkAuth(r) {
+		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	out, err := a.runBestEffort("systemctl restart xray || true")
+	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "output": out, "error": errString(err)})
+}
+
+func (a *App) handleSystemRestartXUI(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !a.checkAuth(r) {
+		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	out, err := a.runBestEffort("systemctl restart x-ui || true")
+	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "output": out, "error": errString(err)})
+}
+
+func (a *App) handleSystemOptimizeBBR(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !a.checkAuth(r) {
+		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "msg": "bbr optimize placeholder"})
+}
+
+func (a *App) handleSystemOptimizeDNS(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !a.checkAuth(r) {
+		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "msg": "dns optimize placeholder"})
+}
+
+func (a *App) handleSystemOptimizeSysctl(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !a.checkAuth(r) {
+		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "msg": "sysctl optimize placeholder"})
+}
+
+func (a *App) handleSystemOptimizeAll(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !a.checkAuth(r) {
+		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "msg": "optimize all placeholder"})
+}
+
+func (a *App) handleSystemXrayVersionCurrent(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !a.checkAuth(r) {
+		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	out, _ := a.runBestEffort("xray -version 2>/dev/null | head -n1")
+	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": map[string]any{"current": strings.TrimSpace(out)}})
+}
+
+func (a *App) handleSystemXrayRealityGen(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !a.checkAuth(r) {
+		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": map[string]any{"privateKey": strings.ReplaceAll(uuid.NewString(), "-", ""), "publicKey": strings.ReplaceAll(uuid.NewString(), "-", ""), "shortId": strings.ReplaceAll(uuid.NewString(), "-", "")[:8]}})
+}
+
+func (a *App) handleSystemXrayConfig(w http.ResponseWriter, r *http.Request) {
+	if !a.checkAuth(r) {
+		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		a.handleXrayConfig(w, r)
+	case http.MethodPost:
+		a.handleXrayApply(w, &http.Request{Method: http.MethodPost, Header: r.Header, Body: r.Body, URL: r.URL})
+	default:
+		a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+func (a *App) handleSystemXrayVersions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !a.checkAuth(r) {
+		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": []string{"current"}})
+}
+
+func (a *App) handleSystemXraySwitch(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !a.checkAuth(r) {
+		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "msg": "switch placeholder"})
+}
+
+func errString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 func (a *App) writeErr(w http.ResponseWriter, code int, msg string) {

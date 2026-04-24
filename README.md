@@ -63,6 +63,19 @@ Go 版本的 SUI（对标 s-ui 的 Go 架构方向），用于逐步替换现有
 - `POST /api/inbounds/:id/toggle`（需 Bearer Token）
 - `GET /api/inbounds/:id/qr`（需 Bearer Token）
 - `GET /api/system/status`（需 Bearer Token）
+- `POST /api/system/restart-panel`（需 Bearer Token）
+- `POST /api/system/chain/test`（需 Bearer Token）
+- `POST /api/system/restart-xray`（需 Bearer Token）
+- `POST /api/system/restart-xui`（需 Bearer Token）
+- `POST /api/system/optimize/bbr`（需 Bearer Token）
+- `POST /api/system/optimize/dns`（需 Bearer Token）
+- `POST /api/system/optimize/sysctl`（需 Bearer Token）
+- `POST /api/system/optimize/all`（需 Bearer Token）
+- `GET /api/system/xray/version-current`（需 Bearer Token）
+- `GET /api/system/xray/reality-gen`（需 Bearer Token）
+- `GET/POST /api/system/xray/config`（需 Bearer Token）
+- `GET /api/system/xray/versions`（需 Bearer Token）
+- `POST /api/system/xray/switch`（需 Bearer Token）
 - `GET /api/view/bootstrap`（需 Bearer Token）
 
 示例（新增 hy2 + 端口跳跃）：
