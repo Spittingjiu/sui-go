@@ -1,0 +1,28 @@
+[
+  {
+    "id": 1,
+    "remark": "hy2-go",
+    "port": 24433,
+    "protocol": "hysteria",
+    "password": "abc123",
+    "network": "hysteria",
+    "security": "tls",
+    "sni": "www.bing.com",
+    "enable": true,
+    "streamSettings": {
+      "hysteriaSettings": {
+        "auth": "abc123",
+        "udpIdleTimeout": 60,
+        "udphop": {
+          "interval": "20-40",
+          "ports": "25000-25010,25020"
+        },
+        "version": 2
+      },
+      "network": "hysteria",
+      "security": "tls"
+    },
+    "createUnix": 1777025680,
+    "updateUnix": 1777025680
+  }
+]

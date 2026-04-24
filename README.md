@@ -1,0 +1,59 @@
+# sui-go
+
+Go 版本的 SUI（对标 s-ui 的 Go 架构方向），用于逐步替换现有 Node 面板。
+
+## 当前状态
+
+当前为 **Phase-1 骨架版**：
+- Go 原生 HTTP 服务
+- inbounds 基础 CRUD（当前已实现 list/add）
+- hysteria2(hy2) 入站创建
+- hy2 UDP hop (`udphop`) 参数支持（`hy2HopPorts` / `hy2HopInterval`）
+- `hy2://` 链接导出支持 `mport` / `mportInterval`
+- 本地 JSON 持久化（后续可切 SQLite）
+
+## 快速启动
+
+- 运行：
+  - `go run ./cmd/sui-go`
+- 默认监听：
+  - `:8811`
+- 可用环境变量：
+  - `ADDR`（默认 `:8811`）
+  - `DATA_FILE`（默认 `data/inbounds.json`）
+
+## API（Phase-1）
+
+- `GET /api/health`
+- `GET /api/inbounds`
+- `POST /api/inbounds/add`
+- `GET /api/inbounds/:id/links`
+
+示例（新增 hy2 + 端口跳跃）：
+
+`POST /api/inbounds/add`
+
+```json
+{
+  "remark": "hy2-hop-test",
+  "port": 24433,
+  "protocol": "hysteria",
+  "password": "abc123",
+  "sni": "www.bing.com",
+  "hy2HopPorts": "25000-25010,25020",
+  "hy2HopInterval": "20-40"
+}
+```
+
+## 路线图（对标 s-ui）
+
+1. 存储层：JSON -> SQLite（gorm）
+2. 认证层：token/session + 面板用户管理
+3. 协议层：vless/vmess/trojan/ss/reality/xhttp 等全量迁移
+4. 运行层：xray/sing-box 进程控制与配置生成
+5. 前端层：迁移现有 `public/index.html` 到 Go embed + API 适配
+6. 发布层：systemd + install.sh + 一键升级
+
+## License
+
+MIT
