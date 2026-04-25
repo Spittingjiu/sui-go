@@ -1707,7 +1707,12 @@ func (a *App) handleSystemOptimizeBBR(w http.ResponseWriter, r *http.Request) {
 		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "msg": "bbr optimize placeholder"})
+	obj, err := a.applyBbrFq()
+	if err != nil {
+		a.writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": obj, "msg": "BBR 已应用"})
 }
 
 func (a *App) handleSystemOptimizeDNS(w http.ResponseWriter, r *http.Request) {
@@ -1719,7 +1724,12 @@ func (a *App) handleSystemOptimizeDNS(w http.ResponseWriter, r *http.Request) {
 		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "msg": "dns optimize placeholder"})
+	obj, err := a.applyDNSProfile()
+	if err != nil {
+		a.writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": obj, "msg": "DNS 配置已应用"})
 }
 
 func (a *App) handleSystemOptimizeSysctl(w http.ResponseWriter, r *http.Request) {
@@ -1731,7 +1741,12 @@ func (a *App) handleSystemOptimizeSysctl(w http.ResponseWriter, r *http.Request)
 		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "msg": "sysctl optimize placeholder"})
+	obj, err := a.applyNetSysctlProfile()
+	if err != nil {
+		a.writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": obj, "msg": "网络栈参数已应用"})
 }
 
 func (a *App) handleSystemOptimizeAll(w http.ResponseWriter, r *http.Request) {
@@ -1743,7 +1758,22 @@ func (a *App) handleSystemOptimizeAll(w http.ResponseWriter, r *http.Request) {
 		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "msg": "optimize all placeholder"})
+	bbr, err := a.applyBbrFq()
+	if err != nil {
+		a.writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	dns, err := a.applyDNSProfile()
+	if err != nil {
+		a.writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	sysctlObj, err := a.applyNetSysctlProfile()
+	if err != nil {
+		a.writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": map[string]any{"bbr": bbr, "dns": dns, "sysctl": sysctlObj}, "msg": "全部优化已应用"})
 }
 
 func (a *App) handleSystemXrayVersionCurrent(w http.ResponseWriter, r *http.Request) {
@@ -1851,7 +1881,23 @@ func (a *App) handleSystemXrayVersions(w http.ResponseWriter, r *http.Request) {
 		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": []string{"current"}})
+	out, err := a.runBestEffort("curl -fsSL https://api.github.com/repos/XTLS/Xray-core/releases?per_page=20")
+	if err != nil {
+		a.writeErr(w, http.StatusInternalServerError, strings.TrimSpace(out))
+		return
+	}
+	var arr []map[string]any
+	if err := json.Unmarshal([]byte(out), &arr); err != nil {
+		a.writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	versions := make([]string, 0, len(arr))
+	for _, it := range arr {
+		if tag, ok := it["tag_name"].(string); ok && strings.TrimSpace(tag) != "" {
+			versions = append(versions, strings.TrimSpace(tag))
+		}
+	}
+	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": versions})
 }
 
 func (a *App) handleSystemXraySwitch(w http.ResponseWriter, r *http.Request) {
@@ -1863,7 +1909,97 @@ func (a *App) handleSystemXraySwitch(w http.ResponseWriter, r *http.Request) {
 		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "msg": "switch placeholder"})
+	var req struct {
+		Version string `json:"version"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		a.writeErr(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	ver := strings.TrimSpace(req.Version)
+	if ver == "" {
+		a.writeErr(w, http.StatusBadRequest, "version required")
+		return
+	}
+	cmd := strings.Join([]string{
+		"set -e",
+		"TMP=$(mktemp -d)",
+		fmt.Sprintf("curl -fL --retry 3 -o \"$TMP/xray.zip\" \"https://github.com/XTLS/Xray-core/releases/download/%s/Xray-linux-64.zip\"", ver),
+		"unzip -o \"$TMP/xray.zip\" -d \"$TMP\" >/dev/null",
+		"install -m 0755 \"$TMP/xray\" /usr/local/bin/xray",
+		"[ -f \"$TMP/geoip.dat\" ] && install -m 0644 \"$TMP/geoip.dat\" /usr/local/share/xray-geoip.dat || true",
+		"[ -f \"$TMP/geosite.dat\" ] && install -m 0644 \"$TMP/geosite.dat\" /usr/local/share/xray-geosite.dat || true",
+		"rm -rf \"$TMP\"",
+		"systemctl daemon-reload || true",
+		"systemctl restart xray || true",
+		"/usr/local/bin/xray version 2>/dev/null | head -n1",
+	}, " && ")
+	out, err := a.runBestEffort(cmd)
+	if err != nil {
+		a.writeErr(w, http.StatusInternalServerError, strings.TrimSpace(out))
+		return
+	}
+	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "msg": "switched to " + ver, "current": strings.TrimSpace(out)})
+}
+
+func (a *App) applyBbrFq() (map[string]any, error) {
+	conf := strings.Join([]string{
+		"net.core.default_qdisc=fq",
+		"net.ipv4.tcp_congestion_control=bbr",
+	}, "\n") + "\n"
+	if err := os.WriteFile("/etc/sysctl.d/99-sui-bbr.conf", []byte(conf), 0o644); err != nil {
+		return nil, err
+	}
+	_, _ = a.runBestEffort("modprobe tcp_bbr || true")
+	if out, err := a.runBestEffort("sysctl --system >/dev/null"); err != nil {
+		return nil, fmt.Errorf(strings.TrimSpace(out))
+	}
+	qdisc, _ := a.runBestEffort("sysctl -n net.core.default_qdisc || true")
+	cc, _ := a.runBestEffort("sysctl -n net.ipv4.tcp_congestion_control || true")
+	return map[string]any{"qdisc": strings.TrimSpace(qdisc), "cc": strings.TrimSpace(cc)}, nil
+}
+
+func (a *App) applyNetSysctlProfile() (map[string]any, error) {
+	conf := strings.Join([]string{
+		"fs.file-max = 1048576",
+		"net.core.somaxconn = 65535",
+		"net.core.netdev_max_backlog = 32768",
+		"net.ipv4.tcp_max_syn_backlog = 8192",
+		"net.ipv4.ip_local_port_range = 1024 65535",
+		"net.ipv4.tcp_fin_timeout = 15",
+		"net.ipv4.tcp_tw_reuse = 1",
+		"net.core.rmem_max = 67108864",
+		"net.core.wmem_max = 67108864",
+		"net.ipv4.tcp_rmem = 4096 87380 33554432",
+		"net.ipv4.tcp_wmem = 4096 65536 33554432",
+		"net.ipv4.tcp_mtu_probing = 1",
+	}, "\n") + "\n"
+	if err := os.WriteFile("/etc/sysctl.d/99-sui-net.conf", []byte(conf), 0o644); err != nil {
+		return nil, err
+	}
+	if out, err := a.runBestEffort("sysctl --system >/dev/null"); err != nil {
+		return nil, fmt.Errorf(strings.TrimSpace(out))
+	}
+	return map[string]any{"ok": true}, nil
+}
+
+func (a *App) applyDNSProfile() (map[string]any, error) {
+	dir := "/etc/systemd/resolved.conf.d"
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, err
+	}
+	conf := strings.Join([]string{
+		"[Resolve]",
+		"DNS=1.1.1.1 8.8.8.8 2606:4700:4700::1111 2001:4860:4860::8888",
+		"FallbackDNS=9.9.9.9 1.0.0.1 2620:fe::fe 2606:4700:4700::1001",
+		"DNSStubListener=yes",
+		"DNSSEC=no",
+	}, "\n") + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "99-sui-dns.conf"), []byte(conf), 0o644); err != nil {
+		return nil, err
+	}
+	_, _ = a.runBestEffort("systemctl restart systemd-resolved || true")
+	return map[string]any{"ok": true}, nil
 }
 
 func shellQuote(s string) string {
