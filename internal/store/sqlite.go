@@ -270,13 +270,20 @@ func (s *SQLiteStore) AddInbound(in model.Inbound) (model.Inbound, error) {
 		SniffingEnabled:  in.SniffingEnabled,
 		SniffingOverride: in.SniffingOverride,
 	}
-	if err := s.db.Create(&row).Error; err != nil {
+	if err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&row).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&row).Updates(map[string]any{
+			"sniffing_enabled":  in.SniffingEnabled,
+			"sniffing_override": in.SniffingOverride,
+		}).Error; err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
 		return model.Inbound{}, err
 	}
-	_ = s.db.Model(&row).Updates(map[string]any{
-		"sniffing_enabled":  in.SniffingEnabled,
-		"sniffing_override": in.SniffingOverride,
-	}).Error
 	in.ID = int64(row.ID)
 	in.Enable = row.Enable
 	in.CreateUnix = row.CreatedAt.Unix()

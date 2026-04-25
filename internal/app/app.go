@@ -2722,7 +2722,7 @@ func (a *App) handleAddRealityQuick(w http.ResponseWriter, r *http.Request) {
 	pk := strings.ReplaceAll(uuid.NewString(), "-", "")
 	prv := strings.ReplaceAll(uuid.NewString(), "-", "")
 	sid := strings.ReplaceAll(uuid.NewString(), "-", "")[:8]
-	in, err := buildInboundFromReq(model.AddInboundRequest{
+	inReq, err := a.normalizeAddInboundRequest(model.AddInboundRequest{
 		Remark:      emptyDefault(req.Remark, "reality-quick"),
 		Port:        req.Port,
 		Protocol:    "vless",
@@ -2737,6 +2737,11 @@ func (a *App) handleAddRealityQuick(w http.ResponseWriter, r *http.Request) {
 		PublicKey:   pk,
 		PrivateKey:  prv,
 	})
+	if err != nil {
+		a.writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	in, err := buildInboundFromReq(inReq)
 	if err != nil {
 		a.writeErr(w, http.StatusBadRequest, err.Error())
 		return
