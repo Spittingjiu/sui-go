@@ -66,5 +66,19 @@ type AddInboundRequest struct {
 	SniffingEnabled    *bool  `json:"sniffingEnabled"`
 	SniffingOverride   string `json:"sniffingDestOverride"`
 	Enable             *bool  `json:"enable"`
-	ExpiryTime         int64  `json:"expiryTime"`
+	ExpiryTime         int64          `json:"expiryTime"`
+	HY2Obfs            string         `json:"hy2Obfs"`
+	HY2ObfsPassword    string         `json:"hy2ObfsPassword"`
+	HY2Congestion      string         `json:"hy2Congestion"`
+	HY2UpMbps          int            `json:"hy2UpMbps"`
+	HY2DownMbps        int            `json:"hy2DownMbps"`
+	HY2IdleTimeout     int            `json:"hy2IdleTimeout"`
+	HY2KeepAlive       int            `json:"hy2KeepAlivePeriod"`
+	HY2InitStreamRW    int            `json:"hy2InitStreamReceiveWindow"`
+	HY2MaxStreamRW     int            `json:"hy2MaxStreamReceiveWindow"`
+	HY2InitConnRW      int            `json:"hy2InitConnectionReceiveWindow"`
+	HY2MaxConnRW       int            `json:"hy2MaxConnectionReceiveWindow"`
+	HY2DisableMTUDisc  *bool          `json:"hy2DisableMtuDiscovery"`
+	SettingsOverride   map[string]any `json:"settingsOverride"`
+	StreamOverride     map[string]any `json:"streamOverride"`
 }

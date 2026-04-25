@@ -587,6 +587,47 @@ func buildInboundFromReq(req model.AddInboundRequest) (model.Inbound, error) {
 			in.SNI = "www.bing.com"
 		}
 		in.Settings = map[string]any{"version": 2, "clients": []map[string]any{{"auth": in.Password, "email": in.Email}}}
+		hs := map[string]any{
+			"version":        2,
+			"auth":           in.Password,
+			"udpIdleTimeout": 60,
+		}
+		if v := strings.TrimSpace(req.HY2Obfs); v != "" {
+			hs["obfs"] = v
+		}
+		if v := strings.TrimSpace(req.HY2ObfsPassword); v != "" {
+			hs["obfsPassword"] = v
+		}
+		if v := strings.TrimSpace(req.HY2Congestion); v != "" {
+			hs["congestion"] = v
+		}
+		if req.HY2UpMbps > 0 {
+			hs["up_mbps"] = req.HY2UpMbps
+		}
+		if req.HY2DownMbps > 0 {
+			hs["down_mbps"] = req.HY2DownMbps
+		}
+		if req.HY2IdleTimeout > 0 {
+			hs["udpIdleTimeout"] = req.HY2IdleTimeout
+		}
+		if req.HY2KeepAlive > 0 {
+			hs["keepAlivePeriod"] = req.HY2KeepAlive
+		}
+		if req.HY2InitStreamRW > 0 {
+			hs["initStreamReceiveWindow"] = req.HY2InitStreamRW
+		}
+		if req.HY2MaxStreamRW > 0 {
+			hs["maxStreamReceiveWindow"] = req.HY2MaxStreamRW
+		}
+		if req.HY2InitConnRW > 0 {
+			hs["initConnectionReceiveWindow"] = req.HY2InitConnRW
+		}
+		if req.HY2MaxConnRW > 0 {
+			hs["maxConnectionReceiveWindow"] = req.HY2MaxConnRW
+		}
+		if req.HY2DisableMTUDisc != nil {
+			hs["disablePathMTUDiscovery"] = *req.HY2DisableMTUDisc
+		}
 		in.Stream = map[string]any{
 			"network":  "hysteria",
 			"security": "tls",
@@ -598,11 +639,7 @@ func buildInboundFromReq(req model.AddInboundRequest) (model.Inbound, error) {
 					"keyFile":         "/etc/sui-hy2/www.bing.com.key",
 				}},
 			},
-			"hysteriaSettings": map[string]any{
-				"version":        2,
-				"auth":           in.Password,
-				"udpIdleTimeout": 60,
-			},
+			"hysteriaSettings": hs,
 		}
 		hopPorts := normalizeHopPorts(req.HY2HopPorts)
 		hopInterval := normalizeHopInterval(req.HY2HopInterval)
@@ -760,6 +797,12 @@ func buildInboundFromReq(req model.AddInboundRequest) (model.Inbound, error) {
 		in.Stream = map[string]any{"network": "tcp", "security": "none"}
 	default:
 		return model.Inbound{}, fmt.Errorf("unsupported protocol: %s", proto)
+	}
+	if len(req.SettingsOverride) > 0 {
+		in.Settings = mergeAnyMap(in.Settings, req.SettingsOverride)
+	}
+	if len(req.StreamOverride) > 0 {
+		in.Stream = mergeAnyMap(in.Stream, req.StreamOverride)
 	}
 	return in, nil
 }
@@ -996,6 +1039,24 @@ func buildCommonStreamSettings(network, security, sni, host, path string) map[st
 		stream["tlsSettings"] = map[string]any{"serverName": emptyDefault(sni, host)}
 	}
 	return stream
+}
+
+func mergeAnyMap(base map[string]any, patch map[string]any) map[string]any {
+	if base == nil {
+		base = map[string]any{}
+	}
+	for k, v := range patch {
+		if vm, ok := v.(map[string]any); ok {
+			if bm, ok2 := base[k].(map[string]any); ok2 {
+				base[k] = mergeAnyMap(bm, vm)
+			} else {
+				base[k] = mergeAnyMap(map[string]any{}, vm)
+			}
+			continue
+		}
+		base[k] = v
+	}
+	return base
 }
 
 func normalizeHopPorts(raw string) string {
