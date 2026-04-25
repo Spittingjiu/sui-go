@@ -247,7 +247,12 @@ func (a *App) handleAddInbound(w http.ResponseWriter, r *http.Request) {
 		a.writeErr(w, http.StatusBadRequest, "invalid json")
 		return
 	}
-	in, err := buildInboundFromReq(req)
+	norm, err := a.normalizeAddInboundRequest(req)
+	if err != nil {
+		a.writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	in, err := buildInboundFromReq(norm)
 	if err != nil {
 		a.writeErr(w, http.StatusBadRequest, err.Error())
 		return
@@ -437,6 +442,99 @@ func (a *App) handleInboundSub(w http.ResponseWriter, r *http.Request) {
 	a.writeErr(w, http.StatusNotFound, "not found")
 }
 
+func (a *App) normalizeAddInboundRequest(req model.AddInboundRequest) (model.AddInboundRequest, error) {
+	proto := strings.ToLower(strings.TrimSpace(req.Protocol))
+	if proto == "" {
+		return req, fmt.Errorf("protocol required")
+	}
+	if req.Port <= 0 {
+		np, err := a.store.NextInboundPort(20000)
+		if err != nil {
+			return req, err
+		}
+		req.Port = np
+	}
+	if strings.TrimSpace(req.Remark) == "" {
+		req.Remark = fmt.Sprintf("%s-%d", proto, req.Port)
+	}
+	if req.Enable == nil {
+		en := true
+		req.Enable = &en
+	}
+	if req.SniffingEnabled == nil {
+		en := true
+		req.SniffingEnabled = &en
+	}
+	if strings.TrimSpace(req.SniffingOverride) == "" {
+		req.SniffingOverride = "http,tls,quic"
+	}
+	if strings.TrimSpace(req.Network) == "" {
+		switch proto {
+		case "hysteria", "hysteria2":
+			req.Network = "hysteria"
+		case "vless", "vmess", "trojan", "shadowsocks", "ss":
+			req.Network = "tcp"
+		}
+	}
+	switch proto {
+	case "vless", "vmess":
+		if strings.TrimSpace(req.UUID) == "" {
+			req.UUID = uuid.NewString()
+		}
+	case "trojan", "hysteria", "hysteria2", "shadowsocks", "ss":
+		if strings.TrimSpace(req.Password) == "" {
+			req.Password = randomToken(8)
+		}
+	}
+	if proto == "shadowsocks" || proto == "ss" {
+		if strings.TrimSpace(req.Method) == "" {
+			req.Method = "aes-256-gcm"
+		}
+	}
+	if strings.TrimSpace(req.Security) == "" {
+		switch proto {
+		case "hysteria", "hysteria2", "trojan":
+			req.Security = "tls"
+		case "vless", "vmess", "shadowsocks", "ss":
+			req.Security = "none"
+		}
+	}
+	if strings.EqualFold(req.Security, "tls") || proto == "hysteria" || proto == "hysteria2" || proto == "trojan" {
+		if strings.TrimSpace(req.SNI) == "" {
+			req.SNI = "www.bing.com"
+		}
+	}
+	if proto == "vless" && strings.EqualFold(req.Security, "reality") {
+		if strings.TrimSpace(req.PrivateKey) == "" || strings.TrimSpace(req.PublicKey) == "" {
+			out, err := a.runBestEffort("xray x25519 2>/dev/null")
+			if err == nil {
+				for _, ln := range strings.Split(out, "\n") {
+					s := strings.TrimSpace(ln)
+					if strings.HasPrefix(s, "PrivateKey:") && strings.TrimSpace(req.PrivateKey) == "" {
+						req.PrivateKey = strings.TrimSpace(strings.TrimPrefix(s, "PrivateKey:"))
+					}
+					if strings.HasPrefix(s, "Password (PublicKey):") && strings.TrimSpace(req.PublicKey) == "" {
+						req.PublicKey = strings.TrimSpace(strings.TrimPrefix(s, "Password (PublicKey):"))
+					}
+				}
+			}
+		}
+		if strings.TrimSpace(req.ShortID) == "" {
+			req.ShortID = strings.ReplaceAll(uuid.NewString(), "-", "")[:8]
+		}
+		if strings.TrimSpace(req.RealityDest) == "" {
+			req.RealityDest = "www.cloudflare.com:443"
+		}
+		if strings.TrimSpace(req.SNI) == "" {
+			req.SNI = "www.cloudflare.com"
+		}
+		if strings.TrimSpace(req.Host) == "" {
+			req.Host = req.SNI
+		}
+	}
+	return req, nil
+}
+
 func buildInboundFromReq(req model.AddInboundRequest) (model.Inbound, error) {
 	if req.Port <= 0 || req.Protocol == "" {
 		return model.Inbound{}, fmt.Errorf("port/protocol required")
@@ -460,9 +558,20 @@ func buildInboundFromReq(req model.AddInboundRequest) (model.Inbound, error) {
 		ShortID:     req.ShortID,
 		PublicKey:   req.PublicKey,
 		PrivateKey:  req.PrivateKey,
-		Settings:    map[string]any{},
-		Stream:      map[string]any{},
-		Extra:       map[string]any{},
+		Settings:         map[string]any{},
+		Stream:           map[string]any{},
+		Extra:            map[string]any{},
+		SniffingEnabled:  true,
+		SniffingOverride: "http,tls,quic",
+	}
+	if req.Enable != nil {
+		in.Enable = *req.Enable
+	}
+	if req.SniffingEnabled != nil {
+		in.SniffingEnabled = *req.SniffingEnabled
+	}
+	if strings.TrimSpace(req.SniffingOverride) != "" {
+		in.SniffingOverride = req.SniffingOverride
 	}
 
 	switch proto {
@@ -975,6 +1084,20 @@ func (a *App) buildXrayConfig() (map[string]any, error) {
 		if stream == nil {
 			stream = map[string]any{}
 		}
+		destOverride := []string{"http", "tls", "quic"}
+		if strings.TrimSpace(in.SniffingOverride) != "" {
+			parts := strings.Split(in.SniffingOverride, ",")
+			tmp := make([]string, 0, len(parts))
+			for _, p := range parts {
+				v := strings.TrimSpace(p)
+				if v != "" {
+					tmp = append(tmp, v)
+				}
+			}
+			if len(tmp) > 0 {
+				destOverride = tmp
+			}
+		}
 		inbounds = append(inbounds, map[string]any{
 			"tag":            fmt.Sprintf("inbound-%d", in.ID),
 			"listen":         "0.0.0.0",
@@ -983,8 +1106,8 @@ func (a *App) buildXrayConfig() (map[string]any, error) {
 			"settings":       settings,
 			"streamSettings": stream,
 			"sniffing": map[string]any{
-				"enabled":      true,
-				"destOverride": []string{"http", "tls", "quic"},
+				"enabled":      in.SniffingEnabled,
+				"destOverride": destOverride,
 			},
 		})
 	}

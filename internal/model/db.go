@@ -25,6 +25,8 @@ type InboundDB struct {
 	Settings    string    `json:"settings"`
 	Stream      string    `json:"streamSettings"`
 	Tag         string    `json:"tag"`
+	SniffingEnabled  bool   `json:"sniffingEnabled" gorm:"default:true"`
+	SniffingOverride string `json:"sniffingDestOverride" gorm:"default:http,tls,quic"`
 	CreatedAt   time.Time `json:"createdAt"`
 	UpdatedAt   time.Time `json:"updatedAt"`
 }

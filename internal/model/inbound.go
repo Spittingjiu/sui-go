@@ -22,9 +22,11 @@ type Inbound struct {
 	Enable      bool           `json:"enable"`
 	Settings    map[string]any `json:"settings,omitempty"`
 	Stream      map[string]any `json:"streamSettings,omitempty"`
-	Extra       map[string]any `json:"extra,omitempty"`
-	CreateUnix  int64          `json:"createUnix"`
-	UpdateUnix  int64          `json:"updateUnix"`
+	Extra            map[string]any `json:"extra,omitempty"`
+	SniffingEnabled  bool           `json:"sniffingEnabled"`
+	SniffingOverride string         `json:"sniffingDestOverride,omitempty"`
+	CreateUnix       int64          `json:"createUnix"`
+	UpdateUnix       int64          `json:"updateUnix"`
 }
 
 type AddInboundRequest struct {
@@ -61,4 +63,8 @@ type AddInboundRequest struct {
 	TunStack           string `json:"tunStack"`
 	TunAutoRoute       bool   `json:"tunAutoRoute"`
 	TunStrictRoute     bool   `json:"tunStrictRoute"`
+	SniffingEnabled    *bool  `json:"sniffingEnabled"`
+	SniffingOverride   string `json:"sniffingDestOverride"`
+	Enable             *bool  `json:"enable"`
+	ExpiryTime         int64  `json:"expiryTime"`
 }

@@ -27,6 +27,8 @@ func NewSQLite(dbPath string) (*SQLiteStore, error) {
 	if err := db.AutoMigrate(&model.InboundDB{}, &model.UserDB{}, &model.TokenDB{}, &model.ForwardDB{}, &model.PanelSettingDB{}); err != nil {
 		return nil, err
 	}
+	_ = db.Exec("ALTER TABLE inbound_dbs ADD COLUMN sniffing_enabled numeric DEFAULT 1").Error
+	_ = db.Exec("ALTER TABLE inbound_dbs ADD COLUMN sniffing_override text DEFAULT 'http,tls,quic'").Error
 	return &SQLiteStore{db: db}, nil
 }
 
@@ -149,12 +151,14 @@ func (s *SQLiteStore) ListInbounds() ([]model.Inbound, error) {
 			RealityDest: r.RealityDest,
 			ShortID:     r.ShortID,
 			PublicKey:   r.PublicKey,
-			PrivateKey:  r.PrivateKey,
-			Enable:      r.Enable,
-			Settings:    settings,
-			Stream:      stream,
-			CreateUnix:  r.CreatedAt.Unix(),
-			UpdateUnix:  r.UpdatedAt.Unix(),
+			PrivateKey:       r.PrivateKey,
+			Enable:           r.Enable,
+			Settings:         settings,
+			Stream:           stream,
+			SniffingEnabled:  r.SniffingEnabled,
+			SniffingOverride: r.SniffingOverride,
+			CreateUnix:       r.CreatedAt.Unix(),
+			UpdateUnix:       r.UpdatedAt.Unix(),
 		})
 	}
 	return out, nil
@@ -190,12 +194,14 @@ func (s *SQLiteStore) GetInbound(id int64) (model.Inbound, bool, error) {
 		RealityDest: r.RealityDest,
 		ShortID:     r.ShortID,
 		PublicKey:   r.PublicKey,
-		PrivateKey:  r.PrivateKey,
-		Enable:      r.Enable,
-		Settings:    settings,
-		Stream:      stream,
-		CreateUnix:  r.CreatedAt.Unix(),
-		UpdateUnix:  r.UpdatedAt.Unix(),
+		PrivateKey:       r.PrivateKey,
+		Enable:           r.Enable,
+		Settings:         settings,
+		Stream:           stream,
+		SniffingEnabled:  r.SniffingEnabled,
+		SniffingOverride: r.SniffingOverride,
+		CreateUnix:       r.CreatedAt.Unix(),
+		UpdateUnix:       r.UpdatedAt.Unix(),
 	}, true, nil
 }
 
@@ -220,16 +226,22 @@ func (s *SQLiteStore) AddInbound(in model.Inbound) (model.Inbound, error) {
 		ShortID:     in.ShortID,
 		PublicKey:   in.PublicKey,
 		PrivateKey:  in.PrivateKey,
-		Enable:      true,
+		Enable:      in.Enable,
 		Settings:    string(settings),
 		Stream:      string(stream),
-		Tag:         fmt.Sprintf("inbound-%d", time.Now().UnixNano()),
+		Tag:              fmt.Sprintf("inbound-%d", time.Now().UnixNano()),
+		SniffingEnabled:  in.SniffingEnabled,
+		SniffingOverride: in.SniffingOverride,
 	}
 	if err := s.db.Create(&row).Error; err != nil {
 		return model.Inbound{}, err
 	}
+	_ = s.db.Model(&row).Updates(map[string]any{
+		"sniffing_enabled":  in.SniffingEnabled,
+		"sniffing_override": in.SniffingOverride,
+	}).Error
 	in.ID = int64(row.ID)
-	in.Enable = true
+	in.Enable = row.Enable
 	in.CreateUnix = row.CreatedAt.Unix()
 	in.UpdateUnix = row.UpdatedAt.Unix()
 	return in, nil
@@ -264,6 +276,8 @@ func (s *SQLiteStore) UpdateInbound(id int64, in model.Inbound) (model.Inbound, 
 	row.PrivateKey = in.PrivateKey
 	row.Settings = string(settings)
 	row.Stream = string(stream)
+	row.SniffingEnabled = in.SniffingEnabled
+	row.SniffingOverride = in.SniffingOverride
 	if err := s.db.Save(&row).Error; err != nil {
 		return model.Inbound{}, false, err
 	}
