@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -468,6 +469,18 @@ func (a *App) normalizeAddInboundRequest(req model.AddInboundRequest) (model.Add
 	if strings.TrimSpace(req.SniffingOverride) == "" {
 		req.SniffingOverride = "http,tls,quic"
 	}
+	if err := validateAddInboundRequest(req); err != nil {
+		return req, err
+	}
+	rows, err := a.store.ListInbounds()
+	if err != nil {
+		return req, err
+	}
+	for _, r := range rows {
+		if r.Port == req.Port {
+			return req, fmt.Errorf("port %d already exists", req.Port)
+		}
+	}
 	if strings.TrimSpace(req.Network) == "" {
 		switch proto {
 		case "hysteria", "hysteria2":
@@ -798,6 +811,7 @@ func buildInboundFromReq(req model.AddInboundRequest) (model.Inbound, error) {
 	default:
 		return model.Inbound{}, fmt.Errorf("unsupported protocol: %s", proto)
 	}
+	applyAdvancedTransportAndTLS(req, &in)
 	if len(req.SettingsOverride) > 0 {
 		in.Settings = mergeAnyMap(in.Settings, req.SettingsOverride)
 	}
@@ -1057,6 +1071,164 @@ func buildCommonStreamSettings(network, security, sni, host, path string) map[st
 		stream["tlsSettings"] = map[string]any{"serverName": emptyDefault(sni, host)}
 	}
 	return stream
+}
+
+func parseCSV(raw string) []string {
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		s := strings.TrimSpace(p)
+		if s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func applyAdvancedTransportAndTLS(req model.AddInboundRequest, in *model.Inbound) {
+	if in == nil || in.Stream == nil {
+		return
+	}
+
+	// TLS 细项（对齐 x-ui 常见字段）
+	if tls, ok := in.Stream["tlsSettings"].(map[string]any); ok {
+		if alpn := parseCSV(req.TLSALPN); len(alpn) > 0 {
+			tls["alpn"] = alpn
+		}
+		settings := map[string]any{}
+		if v := strings.TrimSpace(req.TLSFingerprint); v != "" {
+			settings["fingerprint"] = v
+		}
+		if req.TLSAllowInsecure != nil {
+			settings["allowInsecure"] = *req.TLSAllowInsecure
+		}
+		if v := strings.TrimSpace(req.TLSMinVersion); v != "" {
+			tls["minVersion"] = v
+		}
+		if v := strings.TrimSpace(req.TLSMaxVersion); v != "" {
+			tls["maxVersion"] = v
+		}
+		if cs := parseCSV(req.TLSCipherSuites); len(cs) > 0 {
+			tls["cipherSuites"] = cs
+		}
+		if len(settings) > 0 {
+			tls["settings"] = settings
+		}
+	}
+
+	netw := strings.ToLower(strings.TrimSpace(in.Network))
+	if netw == "" {
+		netw = strings.ToLower(strings.TrimSpace(req.Network))
+	}
+
+	// KCP 细项
+	if netw == "kcp" {
+		k := map[string]any{}
+		if req.KCPMtu > 0 {
+			k["mtu"] = req.KCPMtu
+		}
+		if req.KCPTti > 0 {
+			k["tti"] = req.KCPTti
+		}
+		if req.KCPUplinkCapacity > 0 {
+			k["uplinkCapacity"] = req.KCPUplinkCapacity
+		}
+		if req.KCPDownlinkCapacity > 0 {
+			k["downlinkCapacity"] = req.KCPDownlinkCapacity
+		}
+		if req.KCPCongestion != nil {
+			k["congestion"] = *req.KCPCongestion
+		}
+		if req.KCPReadBufferSize > 0 {
+			k["readBufferSize"] = req.KCPReadBufferSize
+		}
+		if req.KCPWriteBufferSize > 0 {
+			k["writeBufferSize"] = req.KCPWriteBufferSize
+		}
+		headType := strings.TrimSpace(req.KCPHeaderType)
+		seed := strings.TrimSpace(req.KCPSeed)
+		if headType != "" || seed != "" {
+			h := map[string]any{}
+			if headType != "" {
+				h["type"] = headType
+			}
+			if seed != "" {
+				h["request"] = map[string]any{"seed": seed}
+			}
+			k["header"] = h
+		}
+		if len(k) > 0 {
+			in.Stream["kcpSettings"] = mergeAnyMap(map[string]any{}, k)
+		}
+	}
+
+	// gRPC 细项
+	if netw == "grpc" {
+		g := map[string]any{}
+		if v := strings.TrimSpace(req.GrpcServiceName); v != "" {
+			g["serviceName"] = strings.TrimPrefix(v, "/")
+		}
+		if v := strings.TrimSpace(req.GrpcAuthority); v != "" {
+			g["authority"] = v
+		}
+		if req.GrpcMultiMode != nil {
+			g["multiMode"] = *req.GrpcMultiMode
+		}
+		if len(g) > 0 {
+			in.Stream["grpcSettings"] = mergeAnyMap(map[string]any{}, g)
+		}
+	}
+
+	// xhttp 细项
+	if netw == "xhttp" {
+		x := map[string]any{}
+		if v := strings.TrimSpace(req.XHTTPMode); v != "" {
+			x["mode"] = v
+		}
+		if v := strings.TrimSpace(req.XHTTPHost); v != "" {
+			x["host"] = v
+		}
+		if v := strings.TrimSpace(req.XHTTPPath); v != "" {
+			x["path"] = v
+		}
+		if len(x) > 0 {
+			in.Stream["xhttpSettings"] = mergeAnyMap(map[string]any{}, x)
+		}
+	}
+}
+
+var (
+	reUUID     = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$`)
+	reShortID  = regexp.MustCompile(`^[0-9a-fA-F]{1,16}$`)
+	reHostLike = regexp.MustCompile(`^[A-Za-z0-9._:-]+$`)
+)
+
+func validateAddInboundRequest(req model.AddInboundRequest) error {
+	if req.Port <= 0 || req.Port > 65535 {
+		return fmt.Errorf("invalid port")
+	}
+	switch req.Port {
+	case 22, 25, 53, 80, 443, 3306, 6379:
+		return fmt.Errorf("port %d is reserved", req.Port)
+	}
+
+	proto := strings.ToLower(strings.TrimSpace(req.Protocol))
+	if (proto == "vless" || proto == "vmess") && strings.TrimSpace(req.UUID) != "" && !reUUID.MatchString(strings.TrimSpace(req.UUID)) {
+		return fmt.Errorf("invalid uuid format")
+	}
+	if proto == "vless" && strings.EqualFold(strings.TrimSpace(req.Security), "reality") {
+		sid := strings.TrimSpace(req.ShortID)
+		if sid != "" && !reShortID.MatchString(sid) {
+			return fmt.Errorf("invalid shortId format")
+		}
+	}
+	if sni := strings.TrimSpace(req.SNI); sni != "" && !reHostLike.MatchString(sni) {
+		return fmt.Errorf("invalid sni format")
+	}
+	if p := strings.TrimSpace(req.Path); p != "" && !strings.HasPrefix(p, "/") {
+		return fmt.Errorf("path must start with /")
+	}
+	return nil
 }
 
 func mergeAnyMap(base map[string]any, patch map[string]any) map[string]any {

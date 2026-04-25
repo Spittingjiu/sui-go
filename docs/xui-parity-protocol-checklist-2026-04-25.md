@@ -32,8 +32,8 @@
 
 ## D. 仍需继续补齐（下一轮）
 ### D1. 协议参数细节
-- [ ] vless/vmess/trojan：补更细 TLS 配置项（ALPN、cipher suites、min/max version、fingerprint）
-- [ ] vless/vmess/trojan：补 KCP 细项、gRPC 多字段、xhttp 更细模式项
+- [x] vless/vmess/trojan：补更细 TLS 配置项（ALPN、cipher suites、min/max version、fingerprint）
+- [x] vless/vmess/trojan：补 KCP 细项、gRPC 多字段、xhttp 更细模式项
 - [ ] shadowsocks：补多用户/2022 系列方法细粒度校验
 - [ ] socks/http：补多账号输入与校验策略
 - [ ] wireguard：补 peers 全量字段（preSharedKey/keepAlive 多 peer）
@@ -41,8 +41,8 @@
 
 ### D2. 参数校验与安全
 - [ ] 按协议建立字段白名单与类型约束（减少 override 误配）
-- [ ] 端口冲突/保留端口校验
-- [ ] 关键参数格式校验（uuid/shortId/sni/path 等）
+- [x] 端口冲突/保留端口校验
+- [x] 关键参数格式校验（uuid/shortId/sni/path 等）
 
 ### D3. 实测矩阵（持续）
 - [ ] 参数级矩阵（不仅协议+传输，还含高风险参数组合）
