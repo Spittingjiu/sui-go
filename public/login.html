@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>sui-go 登录</title>
+  <style>
+    :root{--bg:#0b1020;--bg2:#131c33;--line:rgba(255,255,255,.12);--card:rgba(20,30,56,.78);--text:#e7edff;--muted:#9aa7cf;--ok:#34d399;--err:#f87171}
+    *{box-sizing:border-box}
+    body{margin:0;min-height:100vh;display:grid;place-items:center;background:radial-gradient(900px 500px at 10% -10%,#223760 0%,transparent 58%),radial-gradient(900px 500px at 100% 0%,#173149 0%,transparent 52%),linear-gradient(180deg,var(--bg),var(--bg2));font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:var(--text)}
+    .card{width:min(420px,92vw);padding:20px;border:1px solid var(--line);border-radius:16px;background:var(--card);backdrop-filter:blur(14px);box-shadow:0 20px 45px rgba(0,0,0,.35)}
+    h1{margin:0 0 6px;font-size:22px}
+    .sub{color:var(--muted);font-size:13px;margin-bottom:14px}
+    input,button{width:100%;height:40px;border-radius:10px;border:1px solid var(--line);background:rgba(8,14,30,.58);color:var(--text);padding:0 12px;outline:none}
+    input+input{margin-top:10px}
+    button{margin-top:12px;cursor:pointer;background:linear-gradient(180deg,rgba(110,168,254,.30),rgba(88,130,222,.22));border-color:rgba(110,168,254,.45);font-weight:600}
+    .msg{margin-top:10px;font-size:13px}
+    .ok{color:var(--ok)} .err{color:var(--err)}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>sui-go 控制台</h1>
+    <div class="sub">请输入账号密码登录</div>
+    <input id="u" placeholder="用户名" value="admin" />
+    <input id="p" type="password" placeholder="密码" />
+    <button id="loginBtn">登 录</button>
+    <div id="msg" class="msg"></div>
+  </div>
+<script>
+let token = localStorage.getItem('sui_go_token') || '';
+const $ = id => document.getElementById(id);
+function say(t,ok=false){const m=$('msg');m.textContent=t||'';m.className='msg '+(ok?'ok':'err');}
+function fmtRetry(ts){if(!ts)return'';const ms=Number(ts)*1000-Date.now();if(ms<=0)return'可立即重试';const s=Math.ceil(ms/1000);const m=Math.floor(s/60);return `请在 ${m>0?m+'分':''}${s%60}秒后重试`;}
+
+async function api(url,opt={}){
+  const h = Object.assign({'content-type':'application/json'}, opt.headers||{});
+  if(token) h['Authorization']='Bearer '+token;
+  const r = await fetch(url,{...opt,headers:h});
+  const j = await r.json().catch(()=>({success:false,msg:'invalid json'}));
+  if(!r.ok){const e=new Error(j.msg||('http '+r.status)); e.data=j; throw e;}
+  return j;
+}
+
+async function tryAuto(){
+  try{
+    const me = await api('/auth/me');
+    if(me && me.success){ location.href='/index.html'; return; }
+  }catch(_e){}
+}
+
+async function doLogin(){
+  try{
+    const j = await api('/auth/login',{method:'POST',body:JSON.stringify({username:($('u').value||'').trim(),password:$('p').value||''})});
+    token = j.token || '';
+    if(token) localStorage.setItem('sui_go_token', token);
+    $('p').value='';
+    say('登录成功，正在进入面板…', true);
+    location.href='/index.html';
+  }catch(e){
+    if(e?.data?.retryAfterUnix){ say('登录受限：'+fmtRetry(e.data.retryAfterUnix), false); return; }
+    say('登录失败：'+(e.message||'unknown error'), false);
+  }
+}
+$('loginBtn').onclick=doLogin;
+$('u').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});
+$('p').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});
+tryAuto();
+</script>
+</body>
+</html>

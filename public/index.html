@@ -131,9 +131,6 @@
         <section id="sec-dashboard" class="main-card">
           <h3>系统总览</h3>
           <div class="row">
-            <input id="u" class="w-md" placeholder="username" value="admin" />
-            <input id="p" class="w-md" placeholder="password" type="password" value="admin123" />
-            <button id="login">登录</button>
             <button id="refresh" class="ghost">刷新 token</button>
             <button id="logout" class="ghost">退出</button>
             <button id="load" class="ghost">刷新数据</button>
@@ -380,23 +377,6 @@ function updateFieldVisibility(){
   $('f-tun').classList.toggle('hidden', p!=='tun');
 }
 
-async function doLogin(){
-  try{
-    const j = await api('/auth/login', {method:'POST', body: JSON.stringify({username:$('u').value,password:$('p').value})});
-    token = j.token || '';
-    localStorage.setItem('sui_go_token', token);
-    $('p').value='';
-    setStatus('已登录');
-    await loadList();
-  }catch(e){
-    let msg = e.message || '登录失败';
-    if(e && e.data && e.data.retryAfterUnix){
-      msg = '登录受限：' + fmtRetry(e.data.retryAfterUnix);
-    }
-    setStatus('登录失败: '+msg, false);
-  }
-}
-
 async function doRefresh(){
   try{
     const j = await api('/auth/refresh', {method:'POST'});
@@ -410,6 +390,7 @@ async function doLogout(){
   try{ await api('/auth/logout', {method:'POST'}); }catch(_e){}
   token=''; localStorage.removeItem('sui_go_token');
   setStatus('已退出');
+  location.href='/login.html';
 }
 
 function getPayload(){
@@ -636,7 +617,15 @@ async function loadList(){
     const inboundHtml = rows.map(x=>`<tr><td>${x.id}</td><td>${x.remark||''}</td><td><span class="tag">${x.protocol||''}</span></td><td>${x.port||''}</td><td>${x.enable===false?'<span class="err">禁用</span>':'<span class="ok">启用</span>'}</td><td><div class="ops"><button class="ghost" onclick="pickInbound(${x.id})">编辑</button><button class="danger" onclick="removeInbound(${x.id})">删除</button><button class="ghost" onclick="loadLinks(${x.id})">links</button><button class="ghost" onclick="showQR(${x.id})">二维码</button></div></td></tr>`).join('');
     const forwardHtml = forwards.map(x=>`<tr><td>F-${x.id}</td><td>${x.remark||''}</td><td><span class="tag">forward/${x.protocol||'tcp'}</span></td><td>${x.listenPort||''}</td><td>${x.enable===false?'<span class="err">禁用</span>':'<span class="ok">启用</span>'}</td><td><div class="ops"><button class="ghost" onclick="pickForward(${x.id})">编辑</button><button class="danger" onclick="removeForward(${x.id})">删除</button></div></td></tr>`).join('');
     $('tb').innerHTML = inboundHtml + forwardHtml;
-  }catch(e){ $('tb').innerHTML=`<tr><td colspan="6" class="err">${e.message}</td></tr>`; }
+  }catch(e){
+    if(e?.data && (e.data.code===401 || /unauthorized/i.test(e.message||''))){
+      token='';
+      localStorage.removeItem('sui_go_token');
+      location.href='/login.html';
+      return;
+    }
+    $('tb').innerHTML=`<tr><td colspan="6" class="err">${e.message}</td></tr>`;
+  }
 }
 
 async function pickInbound(id){
@@ -750,7 +739,6 @@ async function updatePanel(){
   }
 }
 
-$('login').onclick=doLogin;
 $('refresh').onclick=doRefresh;
 $('logout').onclick=doLogout;
 $('load').onclick=loadList;
@@ -784,12 +772,25 @@ window.loadLinks = loadLinks;
 window.showQR = showQR;
 
 resetForm();
-if(token){
-  setStatus('检测到本地 token，可直接操作');
-  loadList();
+async function ensureAuthed(){
+  try{
+    const me = await api('/auth/me');
+    if(!(me && me.success)) throw new Error(me?.msg||'unauthorized');
+    setStatus('已登录：'+(me.user||'admin'));
+    return true;
+  }catch(_e){
+    token='';
+    localStorage.removeItem('sui_go_token');
+    location.href='/login.html';
+    return false;
+  }
 }
-$('p').addEventListener('keydown', (e)=>{ if(e.key==='Enter') doLogin(); });
-$('u').addEventListener('keydown', (e)=>{ if(e.key==='Enter') doLogin(); });
+
+(async()=>{
+  const ok = await ensureAuthed();
+  if(!ok) return;
+  loadList();
+})();
 </script>
 </body>
 </html>
