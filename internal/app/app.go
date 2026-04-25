@@ -696,7 +696,34 @@ func buildInboundFromReq(req model.AddInboundRequest) (model.Inbound, error) {
 		if in.Method == "" {
 			in.Method = "aes-128-gcm"
 		}
-		in.Settings = map[string]any{"method": in.Method, "password": in.Password, "network": "tcp,udp"}
+		settings := map[string]any{"method": in.Method, "password": in.Password, "network": "tcp,udp"}
+		if req.SSIvCheck != nil {
+			settings["ivCheck"] = *req.SSIvCheck
+		}
+		if len(req.SSClients) > 0 {
+			clients := make([]map[string]any, 0, len(req.SSClients))
+			is2022 := strings.Contains(strings.ToLower(in.Method), "2022")
+			for i, c := range req.SSClients {
+				pwd := strings.TrimSpace(c.Password)
+				if pwd == "" {
+					return model.Inbound{}, fmt.Errorf("ssClients[%d].password required", i)
+				}
+				client := map[string]any{"password": pwd}
+				if !is2022 {
+					m := strings.TrimSpace(c.Method)
+					if m == "" {
+						m = in.Method
+					}
+					client["method"] = m
+				}
+				if e := strings.TrimSpace(c.Email); e != "" {
+					client["email"] = e
+				}
+				clients = append(clients, client)
+			}
+			settings["clients"] = clients
+		}
+		in.Settings = settings
 		in.Network = normalizeInboundNetwork(in.Network)
 		if in.Security == "" {
 			in.Security = "none"
@@ -710,29 +737,51 @@ func buildInboundFromReq(req model.AddInboundRequest) (model.Inbound, error) {
 		}
 		settings := map[string]any{"auth": authMode, "udp": true}
 		if authMode == "password" {
-			u := strings.TrimSpace(req.AccountUser)
-			p := req.AccountPass
-			if u == "" || p == "" {
-				return model.Inbound{}, fmt.Errorf("socks password auth requires accountUser/accountPass")
+			accounts := make([]map[string]any, 0)
+			for _, a := range req.SocksAccounts {
+				u := strings.TrimSpace(a.User)
+				p := a.Pass
+				if u == "" || p == "" {
+					continue
+				}
+				accounts = append(accounts, map[string]any{"user": u, "pass": p})
 			}
-			settings["accounts"] = []map[string]any{{"user": u, "pass": p}}
+			if len(accounts) == 0 {
+				u := strings.TrimSpace(req.AccountUser)
+				p := req.AccountPass
+				if u == "" || p == "" {
+					return model.Inbound{}, fmt.Errorf("socks password auth requires socksAccounts or accountUser/accountPass")
+				}
+				accounts = append(accounts, map[string]any{"user": u, "pass": p})
+			}
+			settings["accounts"] = accounts
 		}
 		in.Settings = settings
 		in.Stream = map[string]any{"network": "tcp", "security": "none"}
 	case "http":
 		in.Protocol = "http"
-		authMode := strings.TrimSpace(req.Auth)
-		if authMode == "" {
-			authMode = "noauth"
+		accounts := make([]map[string]any, 0)
+		for _, a := range req.HTTPAccounts {
+			u := strings.TrimSpace(a.User)
+			p := a.Pass
+			if u == "" || p == "" {
+				continue
+			}
+			accounts = append(accounts, map[string]any{"user": u, "pass": p})
 		}
-		settings := map[string]any{}
-		if authMode == "password" {
+		if len(accounts) == 0 {
 			u := strings.TrimSpace(req.AccountUser)
 			p := req.AccountPass
-			if u == "" || p == "" {
-				return model.Inbound{}, fmt.Errorf("http password auth requires accountUser/accountPass")
+			if u != "" && p != "" {
+				accounts = append(accounts, map[string]any{"user": u, "pass": p})
 			}
-			settings["accounts"] = []map[string]any{{"user": u, "pass": p}}
+		}
+		settings := map[string]any{}
+		if len(accounts) > 0 {
+			settings["accounts"] = accounts
+		}
+		if req.AllowTransparent != nil {
+			settings["allowTransparent"] = *req.AllowTransparent
 		}
 		in.Settings = settings
 		in.Stream = map[string]any{"network": "tcp", "security": "none"}
@@ -760,29 +809,70 @@ func buildInboundFromReq(req model.AddInboundRequest) (model.Inbound, error) {
 			mtu = 1420
 		}
 		sk := strings.TrimSpace(req.WireguardSecretKey)
-		pk := ""
 		if sk == "" {
-			sk, pk = generateWireguardKeypair()
-		} else {
-			_, pk = generateWireguardKeypair()
+			sk, _ = generateWireguardKeypair()
 		}
-		peerAllowed := strings.TrimSpace(req.WireguardAddress)
-		if peerAllowed == "" {
-			peerAllowed = "10.0.0.2/32"
+		peers := make([]map[string]any, 0)
+		if len(req.WireguardPeers) > 0 {
+			for i, p := range req.WireguardPeers {
+				pub := strings.TrimSpace(p.PublicKey)
+				if pub == "" {
+					return model.Inbound{}, fmt.Errorf("wireguardPeers[%d].publicKey required", i)
+				}
+				allowed := make([]string, 0)
+				for _, ip := range p.AllowedIPs {
+					v := strings.TrimSpace(ip)
+					if v == "" {
+						continue
+					}
+					if !strings.Contains(v, "/") {
+						v += "/32"
+					}
+					allowed = append(allowed, v)
+				}
+				if len(allowed) == 0 {
+					allowed = []string{"10.0.0.2/32"}
+				}
+				peer := map[string]any{
+					"publicKey":  pub,
+					"allowedIPs": allowed,
+				}
+				if pk := strings.TrimSpace(p.PrivateKey); pk != "" {
+					peer["privateKey"] = pk
+				}
+				if psk := strings.TrimSpace(p.PreSharedKey); psk != "" {
+					peer["preSharedKey"] = psk
+				}
+				if p.KeepAlive > 0 {
+					peer["keepAlive"] = p.KeepAlive
+				}
+				peers = append(peers, peer)
+			}
 		}
-		if !strings.Contains(peerAllowed, "/") {
-			peerAllowed += "/32"
+		if len(peers) == 0 {
+			peerAllowed := strings.TrimSpace(req.WireguardAddress)
+			if peerAllowed == "" {
+				peerAllowed = "10.0.0.2/32"
+			}
+			if !strings.Contains(peerAllowed, "/") {
+				peerAllowed += "/32"
+			}
+			_, pk := generateWireguardKeypair()
+			peers = append(peers, map[string]any{
+				"publicKey":  pk,
+				"allowedIPs": []string{peerAllowed},
+				"keepAlive":  0,
+			})
 		}
-		peer := map[string]any{
-			"publicKey":  pk,
-			"allowedIPs": []string{peerAllowed},
-			"keepAlive":  0,
+		noKernelTun := false
+		if req.WireguardNoKernelTun != nil {
+			noKernelTun = *req.WireguardNoKernelTun
 		}
 		in.Settings = map[string]any{
 			"mtu":         mtu,
 			"secretKey":   sk,
-			"peers":       []map[string]any{peer},
-			"noKernelTun": false,
+			"peers":       peers,
+			"noKernelTun": noKernelTun,
 		}
 		in.Stream = map[string]any{"network": "tcp", "security": "none"}
 	case "tun":
@@ -799,13 +889,17 @@ func buildInboundFromReq(req model.AddInboundRequest) (model.Inbound, error) {
 		if stack == "" {
 			stack = "system"
 		}
+		userLevel := req.TunUserLevel
+		if userLevel < 0 {
+			userLevel = 0
+		}
 		in.Settings = map[string]any{
 			"name":        name,
 			"mtu":         mtu,
 			"stack":       stack,
 			"autoRoute":   req.TunAutoRoute,
 			"strictRoute": req.TunStrictRoute,
-			"userLevel":   0,
+			"userLevel":   userLevel,
 		}
 		in.Stream = map[string]any{"network": "tcp", "security": "none"}
 	default:
@@ -1227,6 +1321,52 @@ func validateAddInboundRequest(req model.AddInboundRequest) error {
 	}
 	if p := strings.TrimSpace(req.Path); p != "" && !strings.HasPrefix(p, "/") {
 		return fmt.Errorf("path must start with /")
+	}
+
+	switch proto {
+	case "shadowsocks", "ss":
+		if m := strings.TrimSpace(req.Method); m != "" {
+			if strings.Contains(strings.ToLower(m), "2022") && strings.TrimSpace(req.Password) == "" && len(req.SSClients) == 0 {
+				return fmt.Errorf("ss 2022 method requires password or ssClients")
+			}
+		}
+		for i, c := range req.SSClients {
+			if strings.TrimSpace(c.Password) == "" {
+				return fmt.Errorf("ssClients[%d].password required", i)
+			}
+		}
+	case "socks":
+		authMode := strings.ToLower(strings.TrimSpace(req.Auth))
+		if authMode == "password" {
+			ok := len(req.SocksAccounts) > 0 || (strings.TrimSpace(req.AccountUser) != "" && req.AccountPass != "")
+			if !ok {
+				return fmt.Errorf("socks password auth requires socksAccounts or accountUser/accountPass")
+			}
+		}
+	case "http":
+		if len(req.HTTPAccounts) > 0 {
+			for i, a := range req.HTTPAccounts {
+				if strings.TrimSpace(a.User) == "" || strings.TrimSpace(a.Pass) == "" {
+					return fmt.Errorf("httpAccounts[%d] user/pass required", i)
+				}
+			}
+		}
+	case "wireguard":
+		if req.WireguardMTU > 0 && (req.WireguardMTU < 1280 || req.WireguardMTU > 9000) {
+			return fmt.Errorf("wireguard mtu out of range")
+		}
+		for i, p := range req.WireguardPeers {
+			if strings.TrimSpace(p.PublicKey) == "" {
+				return fmt.Errorf("wireguardPeers[%d].publicKey required", i)
+			}
+			if p.KeepAlive < 0 || p.KeepAlive > 600 {
+				return fmt.Errorf("wireguardPeers[%d].keepAlive out of range", i)
+			}
+		}
+	case "tun":
+		if req.TunMTU > 0 && (req.TunMTU < 1280 || req.TunMTU > 9000) {
+			return fmt.Errorf("tun mtu out of range")
+		}
 	}
 	return nil
 }
