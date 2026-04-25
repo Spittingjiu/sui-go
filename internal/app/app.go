@@ -1243,6 +1243,16 @@ func (a *App) handlePanelSettings(w http.ResponseWriter, r *http.Request) {
 		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
+	maskToken := func(tok string) string {
+		tok = strings.TrimSpace(tok)
+		if tok == "" {
+			return ""
+		}
+		if len(tok) <= 12 {
+			return tok
+		}
+		return tok[:6] + "..." + tok[len(tok)-6:]
+	}
 	switch r.Method {
 	case http.MethodGet:
 		p, err := a.store.GetPanelSetting()
@@ -1250,7 +1260,12 @@ func (a *App) handlePanelSettings(w http.ResponseWriter, r *http.Request) {
 			a.writeErr(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": map[string]any{"username": p.Username, "panelPath": p.PanelPath}})
+		a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": map[string]any{
+			"username":           p.Username,
+			"panelPath":          p.PanelPath,
+			"forceResetPassword": false,
+			"panelTokenMasked":   maskToken(p.APIToken),
+		}})
 	case http.MethodPost:
 		var req struct {
 			Username  string `json:"username"`
@@ -1265,7 +1280,12 @@ func (a *App) handlePanelSettings(w http.ResponseWriter, r *http.Request) {
 			a.writeErr(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": map[string]any{"username": p.Username, "panelPath": p.PanelPath}})
+		a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": map[string]any{
+			"username":           p.Username,
+			"panelPath":          p.PanelPath,
+			"forceResetPassword": false,
+			"panelTokenMasked":   maskToken(p.APIToken),
+		}})
 	default:
 		a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
@@ -1491,7 +1511,58 @@ func (a *App) handleViewBootstrap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p, _ := a.store.GetPanelSetting()
-	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": map[string]any{"panelPath": p.PanelPath, "username": p.Username}})
+	panelSvc := map[string]any{"name": "sui-go", "active": "unknown", "enabled": "unknown"}
+	xraySvc := map[string]any{"name": "xray", "active": "unknown", "enabled": "unknown"}
+	if out, err := a.runBestEffort("systemctl is-active sui-go 2>/dev/null || true"); err == nil {
+		v := strings.TrimSpace(out)
+		if v == "" {
+			v = "inactive"
+		}
+		panelSvc["active"] = v
+	}
+	if out, err := a.runBestEffort("systemctl is-enabled sui-go 2>/dev/null || true"); err == nil {
+		v := strings.TrimSpace(out)
+		if v == "" {
+			v = "disabled"
+		}
+		panelSvc["enabled"] = v
+	}
+	if out, err := a.runBestEffort("systemctl is-active xray 2>/dev/null || true"); err == nil {
+		v := strings.TrimSpace(out)
+		if v == "" {
+			v = "inactive"
+		}
+		xraySvc["active"] = v
+	}
+	if out, err := a.runBestEffort("systemctl is-enabled xray 2>/dev/null || true"); err == nil {
+		v := strings.TrimSpace(out)
+		if v == "" {
+			v = "disabled"
+		}
+		xraySvc["enabled"] = v
+	}
+	rows, _ := a.store.ListInbounds()
+	enabled := 0
+	for _, in := range rows {
+		if in.Enable {
+			enabled++
+		}
+	}
+	xver := map[string]any{"binary": "", "panel": "self-hosted"}
+	if out, err := a.runBestEffort("xray version 2>/dev/null | head -n1"); err == nil {
+		xver["binary"] = strings.TrimSpace(out)
+	}
+	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": map[string]any{
+		"panel": map[string]any{"username": p.Username, "panelPath": p.PanelPath, "forceResetPassword": false},
+		"status": map[string]any{
+			"panel":          panelSvc,
+			"xray":           xraySvc,
+			"xrayVersion":    xver["binary"],
+			"inboundsTotal":  len(rows),
+			"inboundsEnabled": enabled,
+		},
+		"xrayVersion": xver,
+	}})
 }
 
 func (a *App) handleAddRealityQuick(w http.ResponseWriter, r *http.Request) {
@@ -1684,8 +1755,8 @@ func (a *App) handleSystemXrayVersionCurrent(w http.ResponseWriter, r *http.Requ
 		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	out, _ := a.runBestEffort("xray -version 2>/dev/null | head -n1")
-	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": map[string]any{"current": strings.TrimSpace(out)}})
+	out, _ := a.runBestEffort("xray version 2>/dev/null | head -n1")
+	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": map[string]any{"binary": strings.TrimSpace(out), "panel": "self-hosted"}})
 }
 
 func (a *App) handleSystemXrayRealityGen(w http.ResponseWriter, r *http.Request) {
@@ -1697,7 +1768,26 @@ func (a *App) handleSystemXrayRealityGen(w http.ResponseWriter, r *http.Request)
 		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": map[string]any{"privateKey": strings.ReplaceAll(uuid.NewString(), "-", ""), "publicKey": strings.ReplaceAll(uuid.NewString(), "-", ""), "shortId": strings.ReplaceAll(uuid.NewString(), "-", "")[:8]}})
+	out, err := a.runBestEffort("xray x25519 2>/dev/null")
+	if err != nil {
+		a.writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	pri, pub := "", ""
+	for _, ln := range strings.Split(out, "\n") {
+		s := strings.TrimSpace(ln)
+		if strings.HasPrefix(s, "PrivateKey:") {
+			pri = strings.TrimSpace(strings.TrimPrefix(s, "PrivateKey:"))
+		}
+		if strings.HasPrefix(s, "Password (PublicKey):") {
+			pub = strings.TrimSpace(strings.TrimPrefix(s, "Password (PublicKey):"))
+		}
+	}
+	if pri == "" || pub == "" {
+		a.writeErr(w, http.StatusInternalServerError, "failed to parse x25519 output")
+		return
+	}
+	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": map[string]any{"privateKey": pri, "publicKey": pub, "shortId": strings.ReplaceAll(uuid.NewString(), "-", "")[:8], "spiderX": "/"}})
 }
 
 func (a *App) handleSystemXrayConfig(w http.ResponseWriter, r *http.Request) {
@@ -1707,9 +1797,46 @@ func (a *App) handleSystemXrayConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodGet:
-		a.handleXrayConfig(w, r)
+		b, err := os.ReadFile(a.cfg.XrayConfigOut)
+		if err != nil {
+			a.writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": map[string]any{"path": a.cfg.XrayConfigOut, "content": string(b)}})
 	case http.MethodPost:
-		a.handleXrayApply(w, r)
+		var req struct {
+			Content string `json:"content"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			a.writeErr(w, http.StatusBadRequest, "invalid json")
+			return
+		}
+		if strings.TrimSpace(req.Content) == "" {
+			a.writeErr(w, http.StatusBadRequest, "配置内容不能为空")
+			return
+		}
+		var parsed any
+		if err := json.Unmarshal([]byte(req.Content), &parsed); err != nil {
+			a.writeErr(w, http.StatusBadRequest, "JSON 格式错误")
+			return
+		}
+		tmp := fmt.Sprintf("%s.tmp-%d.json", a.cfg.XrayConfigOut, time.Now().UnixMilli())
+		pretty, _ := json.MarshalIndent(parsed, "", "  ")
+		if err := os.WriteFile(tmp, pretty, 0o644); err != nil {
+			a.writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if out, err := a.runBestEffort(fmt.Sprintf("xray run -test -config %s", shellQuote(tmp))); err != nil {
+			_ = os.Remove(tmp)
+			a.writeErr(w, http.StatusBadRequest, strings.TrimSpace(out))
+			return
+		}
+		if err := os.Rename(tmp, a.cfg.XrayConfigOut); err != nil {
+			_ = os.Remove(tmp)
+			a.writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "msg": "配置已保存并通过校验（未自动重启）"})
 	default:
 		a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
