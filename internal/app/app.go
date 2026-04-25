@@ -1,7 +1,10 @@
 package app
 
 import (
+	"bytes"
+	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -16,6 +19,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Spittingjiu/sui-go/internal/model"
@@ -37,6 +41,11 @@ type App struct {
 	cfg   Config
 	mux   *http.ServeMux
 	store *store.SQLiteStore
+
+	reloadMu sync.Mutex
+	cacheMu  sync.RWMutex
+	cacheKey string
+	cacheCfg map[string]any
 }
 
 func New(cfg Config) (*App, error) {
@@ -1805,11 +1814,47 @@ func emptyDefault(v, d string) string {
 	return v
 }
 
+func computeInboundCacheKey(rows []model.Inbound) string {
+	h := sha256.New()
+	for _, in := range rows {
+		_, _ = h.Write([]byte(fmt.Sprintf("%d|%s|%d|%s|%t|%s|", in.ID, in.Remark, in.Port, in.Protocol, in.Enable, in.SniffingOverride)))
+		sb, _ := json.Marshal(in.Settings)
+		stb, _ := json.Marshal(in.Stream)
+		_, _ = h.Write(sb)
+		_, _ = h.Write(stb)
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+func cloneAnyMap(in map[string]any) map[string]any {
+	if in == nil {
+		return map[string]any{}
+	}
+	b, err := json.Marshal(in)
+	if err != nil {
+		return in
+	}
+	var out map[string]any
+	if err := json.Unmarshal(b, &out); err != nil {
+		return in
+	}
+	return out
+}
+
 func (a *App) buildXrayConfig() (map[string]any, error) {
 	rows, err := a.store.ListInbounds()
 	if err != nil {
 		return nil, err
 	}
+	key := computeInboundCacheKey(rows)
+	a.cacheMu.RLock()
+	if a.cacheCfg != nil && a.cacheKey == key {
+		cfg := cloneAnyMap(a.cacheCfg)
+		a.cacheMu.RUnlock()
+		return cfg, nil
+	}
+	a.cacheMu.RUnlock()
+
 	inbounds := make([]map[string]any, 0, len(rows))
 	for _, in := range rows {
 		settings := in.Settings
@@ -1852,6 +1897,10 @@ func (a *App) buildXrayConfig() (map[string]any, error) {
 		"inbounds":  inbounds,
 		"outbounds": []map[string]any{{"protocol": "freedom", "tag": "direct"}, {"protocol": "blackhole", "tag": "block"}},
 	}
+	a.cacheMu.Lock()
+	a.cacheKey = key
+	a.cacheCfg = cloneAnyMap(cfg)
+	a.cacheMu.Unlock()
 	return cfg, nil
 }
 
@@ -1933,8 +1982,17 @@ func (a *App) handleXrayApply(w http.ResponseWriter, r *http.Request) {
 		a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "path": a.cfg.XrayConfigOut, "applied": false, "msg": "reload command not configured"})
 		return
 	}
-	cmd := exec.Command("bash", "-lc", a.cfg.XrayReloadCmd)
+	a.reloadMu.Lock()
+	defer a.reloadMu.Unlock()
+
+	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "bash", "-lc", a.cfg.XrayReloadCmd)
 	out, err := cmd.CombinedOutput()
+	if ctx.Err() == context.DeadlineExceeded {
+		a.writeJSON(w, http.StatusOK, map[string]any{"success": false, "path": a.cfg.XrayConfigOut, "applied": false, "error": "reload timeout", "output": string(out)})
+		return
+	}
 	if err != nil {
 		a.writeJSON(w, http.StatusOK, map[string]any{"success": false, "path": a.cfg.XrayConfigOut, "applied": false, "error": err.Error(), "output": string(out)})
 		return
@@ -2878,6 +2936,16 @@ func (a *App) writeErr(w http.ResponseWriter, code int, msg string) {
 
 func (a *App) writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	if code == http.StatusOK {
+		w.Header().Set("Cache-Control", "no-store")
+	}
 	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(v)
+	buf := bytes.NewBuffer(make([]byte, 0, 512))
+	enc := json.NewEncoder(buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		_, _ = w.Write([]byte(`{"success":false,"msg":"encode response failed"}\n`))
+		return
+	}
+	_, _ = w.Write(buf.Bytes())
 }
