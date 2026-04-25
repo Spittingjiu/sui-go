@@ -1,0 +1,182 @@
+{
+  "generatedAt": "2026-04-25 12:26:00 CST",
+  "total": 29,
+  "ok": 29,
+  "fail": 0,
+  "results": [
+    {
+      "case": "hysteria+hysteria",
+      "ok": true,
+      "rc": 0,
+      "msg": "OK"
+    },
+    {
+      "case": "vless+tcp+none",
+      "ok": true,
+      "rc": 0,
+      "msg": "OK"
+    },
+    {
+      "case": "vless+ws+tls",
+      "ok": true,
+      "rc": 0,
+      "msg": "OK"
+    },
+    {
+      "case": "vless+xhttp+tls",
+      "ok": true,
+      "rc": 0,
+      "msg": "OK"
+    },
+    {
+      "case": "vless+grpc+tls",
+      "ok": true,
+      "rc": 0,
+      "msg": "OK"
+    },
+    {
+      "case": "vless+httpupgrade+tls",
+      "ok": true,
+      "rc": 0,
+      "msg": "OK"
+    },
+    {
+      "case": "vless+tcp+reality",
+      "ok": true,
+      "rc": 0,
+      "msg": "OK"
+    },
+    {
+      "case": "vmess+tcp+none",
+      "ok": true,
+      "rc": 0,
+      "msg": "OK"
+    },
+    {
+      "case": "vmess+ws+tls",
+      "ok": true,
+      "rc": 0,
+      "msg": "OK"
+    },
+    {
+      "case": "vmess+xhttp+tls",
+      "ok": true,
+      "rc": 0,
+      "msg": "OK"
+    },
+    {
+      "case": "vmess+grpc+tls",
+      "ok": true,
+      "rc": 0,
+      "msg": "OK"
+    },
+    {
+      "case": "vmess+httpupgrade+tls",
+      "ok": true,
+      "rc": 0,
+      "msg": "OK"
+    },
+    {
+      "case": "vmess+kcp+none",
+      "ok": true,
+      "rc": 0,
+      "msg": "OK"
+    },
+    {
+      "case": "trojan+tcp+tls",
+      "ok": true,
+      "rc": 0,
+      "msg": "OK"
+    },
+    {
+      "case": "trojan+ws+tls",
+      "ok": true,
+      "rc": 0,
+      "msg": "OK"
+    },
+    {
+      "case": "trojan+xhttp+tls",
+      "ok": true,
+      "rc": 0,
+      "msg": "OK"
+    },
+    {
+      "case": "trojan+grpc+tls",
+      "ok": true,
+      "rc": 0,
+      "msg": "OK"
+    },
+    {
+      "case": "trojan+httpupgrade+tls",
+      "ok": true,
+      "rc": 0,
+      "msg": "OK"
+    },
+    {
+      "case": "shadowsocks+tcp+none",
+      "ok": true,
+      "rc": 0,
+      "msg": "OK"
+    },
+    {
+      "case": "shadowsocks+ws+tls",
+      "ok": true,
+      "rc": 0,
+      "msg": "OK"
+    },
+    {
+      "case": "shadowsocks+xhttp+tls",
+      "ok": true,
+      "rc": 0,
+      "msg": "OK"
+    },
+    {
+      "case": "shadowsocks+grpc+tls",
+      "ok": true,
+      "rc": 0,
+      "msg": "OK"
+    },
+    {
+      "case": "shadowsocks+httpupgrade+tls",
+      "ok": true,
+      "rc": 0,
+      "msg": "OK"
+    },
+    {
+      "case": "shadowsocks+kcp+none",
+      "ok": true,
+      "rc": 0,
+      "msg": "OK"
+    },
+    {
+      "case": "socks+password",
+      "ok": true,
+      "rc": 0,
+      "msg": "OK"
+    },
+    {
+      "case": "http+noauth",
+      "ok": true,
+      "rc": 0,
+      "msg": "OK"
+    },
+    {
+      "case": "dokodemo-door",
+      "ok": true,
+      "rc": 0,
+      "msg": "OK"
+    },
+    {
+      "case": "wireguard",
+      "ok": true,
+      "rc": 0,
+      "msg": "OK"
+    },
+    {
+      "case": "tun",
+      "ok": true,
+      "rc": 0,
+      "msg": "OK"
+    }
+  ]
+}
