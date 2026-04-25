@@ -72,11 +72,11 @@
 
     .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
     .row + .row{margin-top:8px}
-    input,select,button{
+    input,select,button,textarea{
       border-radius:10px;border:1px solid var(--line);background:rgba(9,14,28,.58);color:var(--text);height:36px;padding:0 10px;font-size:13px;outline:none
     }
-    input::placeholder{color:#8fa0cf}
-    input:focus,select:focus{border-color:rgba(110,168,254,.7);box-shadow:0 0 0 3px rgba(110,168,254,.16)}
+    input::placeholder,textarea::placeholder{color:#8fa0cf}
+    input:focus,select:focus,textarea:focus{border-color:rgba(110,168,254,.7);box-shadow:0 0 0 3px rgba(110,168,254,.16)}
     button{cursor:pointer;background:linear-gradient(180deg,rgba(110,168,254,.28),rgba(88,130,222,.2));border-color:rgba(110,168,254,.45);font-weight:600}
     button:hover{transform:translateY(-1px);filter:brightness(1.04)}
     button.ghost{background:rgba(255,255,255,.04);border-color:var(--line);font-weight:500}
@@ -101,6 +101,7 @@
       background:rgba(2,8,20,.56);border:1px solid rgba(255,255,255,.1);
       border-radius:12px;padding:10px 12px;color:#cdd8ff;max-height:300px;overflow:auto;font-size:12px;line-height:1.55
     }
+    textarea{height:auto;min-height:88px;padding:8px 10px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
   </style>
 </head>
 <body>
@@ -123,6 +124,7 @@
         <button class="nav-btn" data-target="sec-editor">Inbound 编辑</button>
         <button class="nav-btn" data-target="sec-list">Inbound 列表</button>
         <button class="nav-btn" data-target="sec-xray">Xray 工作台</button>
+        <button class="nav-btn" data-target="sec-lab">SUI Lab（特色）</button>
       </aside>
 
       <main class="main">
@@ -143,6 +145,12 @@
             <input id="subPass" class="w-md" placeholder="sui-sub 密码" type="password" />
             <input id="subSourceName" class="w-md" placeholder="源名称（默认 sui-go）" value="sui-go" />
             <button id="connectSub">对接 SUB</button>
+          </div>
+          <div class="row" style="margin-top:8px">
+            <button id="quickHy2">一键 HY2 模板</button>
+            <button id="quickVlessReality" class="ghost">一键 VLESS+REALITY</button>
+            <button id="quickTrojan" class="ghost">一键 Trojan TLS</button>
+            <div class="muted">SUI 特色：快速模板 + 可二次编辑</div>
           </div>
           <div class="stats" style="margin-top:10px">
             <div class="stat"><div class="k">Inbound 总数</div><div class="v" id="stTotal">0</div></div>
@@ -269,6 +277,25 @@
           </div>
           <pre id="cfgOut"></pre>
         </section>
+
+        <section id="sec-lab" class="card hidden">
+          <h3>SUI Lab（x-ui 兼容 + SUI 特色）</h3>
+          <div class="row">
+            <button id="btnCloneById" class="ghost">按 ID 克隆</button>
+            <input id="cloneSourceId" class="w-sm" placeholder="源 ID" />
+            <input id="cloneNewPort" class="w-sm" placeholder="新端口(可空)" />
+            <input id="cloneNameSuffix" class="w-md" placeholder="备注后缀(默认-copy)" value="-copy" />
+            <button id="btnDoClone">执行克隆</button>
+          </div>
+          <div class="row">
+            <textarea id="xuiJsonInput" style="width:100%" placeholder='可直接粘贴 x-ui 风格 JSON（含 settings/streamSettings）进行创建'></textarea>
+          </div>
+          <div class="row">
+            <button id="btnCreateFromJson">按 JSON 创建</button>
+            <button id="btnFormatJson" class="ghost">格式化 JSON</button>
+          </div>
+          <pre id="labOut"></pre>
+        </section>
       </main>
     </div>
   </div>
@@ -308,7 +335,7 @@ function setStatus(msg, ok=true){
 }
 
 function switchSection(targetId){
-  ['sec-dashboard','sec-editor','sec-list','sec-xray'].forEach(id=>$(id).classList.add('hidden'));
+  ['sec-dashboard','sec-editor','sec-list','sec-xray','sec-lab'].forEach(id=>$(id).classList.add('hidden'));
   $(targetId).classList.remove('hidden');
   document.querySelectorAll('.nav-btn').forEach(btn=>btn.classList.remove('active'));
   document.querySelector(`.nav-btn[data-target="${targetId}"]`)?.classList.add('active');
@@ -447,6 +474,76 @@ function fillForm(x){
   $('hopPorts').value = hop.ports || '';
   $('hopInt').value = hop.interval || '';
   updateFieldVisibility();
+}
+
+function applyPreset(kind){
+  resetForm();
+  if(kind==='hy2'){
+    $('proto').value='hysteria';
+    $('remark').value='hy2-quick';
+    $('sec').value='tls';
+    $('hyNet').value='hysteria';
+    $('sni').value='www.bing.com';
+  }else if(kind==='vless-reality'){
+    $('proto').value='vless';
+    $('remark').value='vless-reality-quick';
+    $('net').value='xhttp';
+    $('sec').value='reality';
+    $('sni').value='www.cloudflare.com';
+    $('path').value='/';
+    $('host').value='www.cloudflare.com';
+  }else if(kind==='trojan'){
+    $('proto').value='trojan';
+    $('remark').value='trojan-quick';
+    $('net').value='tcp';
+    $('sec').value='tls';
+    $('sni').value='www.bing.com';
+  }
+  updateFieldVisibility();
+  switchSection('sec-editor');
+  $('addOut').textContent='已应用快速模板，可直接新增';
+}
+
+async function cloneInbound(){
+  const srcId = Number(($('cloneSourceId').value||'').trim());
+  if(!srcId){ $('labOut').textContent='请填写源 ID'; return; }
+  try{
+    const j=await api(`/api/inbounds/${srcId}/full`);
+    const x=j.obj||{};
+    const suffix=($('cloneNameSuffix').value||'').trim() || '-copy';
+    const body={...x};
+    delete body.id;
+    delete body.createUnix;
+    delete body.updateUnix;
+    body.remark = String((x.remark||'inbound') + suffix);
+    const np = Number(($('cloneNewPort').value||'').trim());
+    if(np>0) body.port=np; else delete body.port;
+    const c=await api('/api/inbounds/add',{method:'POST',body:JSON.stringify(body)});
+    $('labOut').textContent=JSON.stringify(c,null,2);
+    await loadList();
+  }catch(e){ $('labOut').textContent='克隆失败: '+e.message; }
+}
+
+function formatJsonInput(){
+  try{
+    const v = $('xuiJsonInput').value || '{}';
+    const j = JSON.parse(v);
+    $('xuiJsonInput').value = JSON.stringify(j,null,2);
+    $('labOut').textContent='JSON 格式化完成';
+  }catch(e){
+    $('labOut').textContent='JSON 格式错误: '+e.message;
+  }
+}
+
+async function createFromXUIJson(){
+  try{
+    const raw = JSON.parse($('xuiJsonInput').value||'{}');
+    const j=await api('/api/inbounds/add',{method:'POST',body:JSON.stringify(raw)});
+    $('labOut').textContent=JSON.stringify(j,null,2);
+    await loadList();
+  }catch(e){
+    $('labOut').textContent='创建失败: '+e.message;
+  }
 }
 
 function resetForm(){
@@ -645,6 +742,13 @@ $('cfgExport').onclick=exportCfg;
 $('cfgApply').onclick=applyCfg;
 $('updatePanel').onclick=updatePanel;
 $('connectSub').onclick=connectSub;
+$('quickHy2').onclick=()=>applyPreset('hy2');
+$('quickVlessReality').onclick=()=>applyPreset('vless-reality');
+$('quickTrojan').onclick=()=>applyPreset('trojan');
+$('btnDoClone').onclick=cloneInbound;
+$('btnCloneById').onclick=()=>switchSection('sec-lab');
+$('btnCreateFromJson').onclick=createFromXUIJson;
+$('btnFormatJson').onclick=formatJsonInput;
 $('copyQrLink').onclick=async()=>{ try{ await navigator.clipboard.writeText($('qrLink').value||''); }catch{} };
 $('closeQr').onclick=()=>$('qrModal').classList.add('hidden');
 $('proto').onchange=updateFieldVisibility;
