@@ -243,11 +243,19 @@ func (a *App) handleAddInbound(w http.ResponseWriter, r *http.Request) {
 		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	var req model.AddInboundRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	var raw map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
 		a.writeErr(w, http.StatusBadRequest, "invalid json")
 		return
 	}
+	b, _ := json.Marshal(raw)
+	var req model.AddInboundRequest
+	if err := json.Unmarshal(b, &req); err != nil {
+		a.writeErr(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	mergeXUIStyleIntoAddReq(&req, raw)
+
 	norm, err := a.normalizeAddInboundRequest(req)
 	if err != nil {
 		a.writeErr(w, http.StatusBadRequest, err.Error())
@@ -297,12 +305,24 @@ func (a *App) handleInboundSub(w http.ResponseWriter, r *http.Request) {
 			}
 			a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": in})
 		case http.MethodPut:
-			var req model.AddInboundRequest
-			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			var raw map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
 				a.writeErr(w, http.StatusBadRequest, "invalid json")
 				return
 			}
-			in, err := buildInboundFromReq(req)
+			b, _ := json.Marshal(raw)
+			var req model.AddInboundRequest
+			if err := json.Unmarshal(b, &req); err != nil {
+				a.writeErr(w, http.StatusBadRequest, "invalid json")
+				return
+			}
+			mergeXUIStyleIntoAddReq(&req, raw)
+			norm, err := a.normalizeAddInboundRequest(req)
+			if err != nil {
+				a.writeErr(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			in, err := buildInboundFromReq(norm)
 			if err != nil {
 				a.writeErr(w, http.StatusBadRequest, err.Error())
 				return
@@ -413,12 +433,24 @@ func (a *App) handleInboundSub(w http.ResponseWriter, r *http.Request) {
 				}
 				a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": in})
 			case http.MethodPut:
-				var req model.AddInboundRequest
-				if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				var raw map[string]any
+				if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
 					a.writeErr(w, http.StatusBadRequest, "invalid json")
 					return
 				}
-				in, err := buildInboundFromReq(req)
+				b, _ := json.Marshal(raw)
+				var req model.AddInboundRequest
+				if err := json.Unmarshal(b, &req); err != nil {
+					a.writeErr(w, http.StatusBadRequest, "invalid json")
+					return
+				}
+				mergeXUIStyleIntoAddReq(&req, raw)
+				norm, err := a.normalizeAddInboundRequest(req)
+				if err != nil {
+					a.writeErr(w, http.StatusBadRequest, err.Error())
+					return
+				}
+				in, err := buildInboundFromReq(norm)
 				if err != nil {
 					a.writeErr(w, http.StatusBadRequest, err.Error())
 					return
@@ -1192,9 +1224,11 @@ func applyAdvancedTransportAndTLS(req model.AddInboundRequest, in *model.Inbound
 		settings := map[string]any{}
 		if v := strings.TrimSpace(req.TLSFingerprint); v != "" {
 			settings["fingerprint"] = v
+			tls["fingerprint"] = v
 		}
 		if req.TLSAllowInsecure != nil {
 			settings["allowInsecure"] = *req.TLSAllowInsecure
+			tls["allowInsecure"] = *req.TLSAllowInsecure
 		}
 		if v := strings.TrimSpace(req.TLSMinVersion); v != "" {
 			tls["minVersion"] = v
@@ -1369,6 +1403,243 @@ func validateAddInboundRequest(req model.AddInboundRequest) error {
 		}
 	}
 	return nil
+}
+
+func asMap(v any) map[string]any {
+	if v == nil {
+		return nil
+	}
+	if m, ok := v.(map[string]any); ok {
+		return m
+	}
+	return nil
+}
+
+func asSliceMap(v any) []map[string]any {
+	arr, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]map[string]any, 0, len(arr))
+	for _, it := range arr {
+		if m, ok := it.(map[string]any); ok {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+func toStr(v any) string {
+	s, _ := v.(string)
+	return strings.TrimSpace(s)
+}
+
+func toInt(v any) int {
+	switch n := v.(type) {
+	case float64:
+		return int(n)
+	case int:
+		return n
+	case int64:
+		return int(n)
+	case string:
+		i, _ := strconv.Atoi(strings.TrimSpace(n))
+		return i
+	default:
+		return 0
+	}
+}
+
+func toBoolPtr(v any) *bool {
+	switch b := v.(type) {
+	case bool:
+		x := b
+		return &x
+	case string:
+		s := strings.ToLower(strings.TrimSpace(b))
+		if s == "true" || s == "1" {
+			x := true
+			return &x
+		}
+		if s == "false" || s == "0" {
+			x := false
+			return &x
+		}
+	}
+	return nil
+}
+
+func mergeXUIStyleIntoAddReq(req *model.AddInboundRequest, raw map[string]any) {
+	if req == nil || raw == nil {
+		return
+	}
+	if v := toStr(raw["listen"]); v != "" {
+		// 占位兼容：x-ui 有 listen 字段，当前后端统一监听 0.0.0.0，不单独落库
+	}
+	if req.Security == "" {
+		if stream := asMap(raw["streamSettings"]); stream != nil {
+			if v := toStr(stream["security"]); v != "" {
+				req.Security = v
+			}
+		}
+	}
+	if stream := asMap(raw["streamSettings"]); stream != nil {
+		if req.Network == "" {
+			if v := toStr(stream["network"]); v != "" {
+				req.Network = v
+			}
+		}
+		if tls := asMap(stream["tlsSettings"]); tls != nil {
+			if req.SNI == "" {
+				req.SNI = toStr(tls["serverName"])
+			}
+			if req.TLSALPN == "" {
+				if arr, ok := tls["alpn"].([]any); ok && len(arr) > 0 {
+					parts := make([]string, 0, len(arr))
+					for _, a := range arr {
+						if s := toStr(a); s != "" {
+							parts = append(parts, s)
+						}
+					}
+					req.TLSALPN = strings.Join(parts, ",")
+				}
+			}
+			if req.TLSFingerprint == "" {
+				req.TLSFingerprint = toStr(tls["fingerprint"])
+			}
+			if req.TLSAllowInsecure == nil {
+				req.TLSAllowInsecure = toBoolPtr(tls["allowInsecure"])
+			}
+		}
+		if ws := asMap(stream["wsSettings"]); ws != nil {
+			if req.Path == "" {
+				req.Path = toStr(ws["path"])
+			}
+			if req.Host == "" {
+				if h := asMap(ws["headers"]); h != nil {
+					req.Host = toStr(h["Host"])
+				}
+			}
+		}
+		if grpc := asMap(stream["grpcSettings"]); grpc != nil {
+			if req.GrpcServiceName == "" {
+				req.GrpcServiceName = toStr(grpc["serviceName"])
+			}
+			if req.GrpcAuthority == "" {
+				req.GrpcAuthority = toStr(grpc["authority"])
+			}
+			if req.GrpcMultiMode == nil {
+				req.GrpcMultiMode = toBoolPtr(grpc["multiMode"])
+			}
+		}
+	}
+	settings := asMap(raw["settings"])
+	if settings == nil {
+		return
+	}
+	proto := strings.ToLower(strings.TrimSpace(req.Protocol))
+	switch proto {
+	case "vless", "vmess":
+		if req.UUID == "" {
+			if cs := asSliceMap(settings["clients"]); len(cs) > 0 {
+				req.UUID = toStr(cs[0]["id"])
+				req.Email = toStr(cs[0]["email"])
+				req.Flow = toStr(cs[0]["flow"])
+			}
+		}
+	case "trojan":
+		if req.Password == "" {
+			if cs := asSliceMap(settings["clients"]); len(cs) > 0 {
+				req.Password = toStr(cs[0]["password"])
+				req.Email = toStr(cs[0]["email"])
+			}
+		}
+	case "shadowsocks", "ss":
+		if req.Method == "" {
+			req.Method = toStr(settings["method"])
+		}
+		if req.Password == "" {
+			req.Password = toStr(settings["password"])
+		}
+		if req.SSIvCheck == nil {
+			req.SSIvCheck = toBoolPtr(settings["ivCheck"])
+		}
+		if len(req.SSClients) == 0 {
+			if cs := asSliceMap(settings["clients"]); len(cs) > 0 {
+				out := make([]model.SSClientInput, 0, len(cs))
+				for _, c := range cs {
+					out = append(out, model.SSClientInput{Method: toStr(c["method"]), Password: toStr(c["password"]), Email: toStr(c["email"])})
+				}
+				req.SSClients = out
+			}
+		}
+	case "socks":
+		if req.Auth == "" {
+			req.Auth = toStr(settings["auth"])
+		}
+		if len(req.SocksAccounts) == 0 {
+			if as := asSliceMap(settings["accounts"]); len(as) > 0 {
+				out := make([]model.UserPassInput, 0, len(as))
+				for _, a := range as {
+					out = append(out, model.UserPassInput{User: toStr(a["user"]), Pass: toStr(a["pass"])})
+				}
+				req.SocksAccounts = out
+			}
+		}
+	case "http":
+		if req.AllowTransparent == nil {
+			req.AllowTransparent = toBoolPtr(settings["allowTransparent"])
+		}
+		if len(req.HTTPAccounts) == 0 {
+			if as := asSliceMap(settings["accounts"]); len(as) > 0 {
+				out := make([]model.UserPassInput, 0, len(as))
+				for _, a := range as {
+					out = append(out, model.UserPassInput{User: toStr(a["user"]), Pass: toStr(a["pass"])})
+				}
+				req.HTTPAccounts = out
+			}
+		}
+	case "wireguard":
+		if req.WireguardMTU == 0 {
+			req.WireguardMTU = toInt(settings["mtu"])
+		}
+		if req.WireguardSecretKey == "" {
+			req.WireguardSecretKey = toStr(settings["secretKey"])
+		}
+		if req.WireguardNoKernelTun == nil {
+			req.WireguardNoKernelTun = toBoolPtr(settings["noKernelTun"])
+		}
+		if len(req.WireguardPeers) == 0 {
+			if ps := asSliceMap(settings["peers"]); len(ps) > 0 {
+				out := make([]model.WireguardPeerInput, 0, len(ps))
+				for _, p := range ps {
+					ips := []string{}
+					if arr, ok := p["allowedIPs"].([]any); ok {
+						for _, a := range arr {
+							if s := toStr(a); s != "" {
+								ips = append(ips, s)
+							}
+						}
+					}
+					out = append(out, model.WireguardPeerInput{PublicKey: toStr(p["publicKey"]), PrivateKey: toStr(p["privateKey"]), PreSharedKey: toStr(p["preSharedKey"]), AllowedIPs: ips, KeepAlive: toInt(p["keepAlive"])})
+				}
+				req.WireguardPeers = out
+			}
+		}
+	case "tun":
+		if req.TunName == "" {
+			req.TunName = toStr(settings["name"])
+		}
+		if req.TunMTU == 0 {
+			req.TunMTU = toInt(settings["mtu"])
+		}
+		if req.TunStack == "" {
+			req.TunStack = toStr(settings["stack"])
+		}
+		if req.TunUserLevel == 0 {
+			req.TunUserLevel = toInt(settings["userLevel"])
+		}
+	}
 }
 
 func mergeAnyMap(base map[string]any, patch map[string]any) map[string]any {
