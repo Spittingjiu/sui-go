@@ -541,23 +541,23 @@ func buildInboundFromReq(req model.AddInboundRequest) (model.Inbound, error) {
 	}
 	proto := strings.ToLower(strings.TrimSpace(req.Protocol))
 	in := model.Inbound{
-		Remark:      req.Remark,
-		Port:        req.Port,
-		Protocol:    proto,
-		Password:    req.Password,
-		UUID:        req.UUID,
-		Email:       req.Email,
-		Method:      req.Method,
-		Flow:        req.Flow,
-		Network:     req.Network,
-		Security:    req.Security,
-		SNI:         req.SNI,
-		Host:        req.Host,
-		Path:        req.Path,
-		RealityDest: req.RealityDest,
-		ShortID:     req.ShortID,
-		PublicKey:   req.PublicKey,
-		PrivateKey:  req.PrivateKey,
+		Remark:           req.Remark,
+		Port:             req.Port,
+		Protocol:         proto,
+		Password:         req.Password,
+		UUID:             req.UUID,
+		Email:            req.Email,
+		Method:           req.Method,
+		Flow:             req.Flow,
+		Network:          req.Network,
+		Security:         req.Security,
+		SNI:              req.SNI,
+		Host:             req.Host,
+		Path:             req.Path,
+		RealityDest:      req.RealityDest,
+		ShortID:          req.ShortID,
+		PublicKey:        req.PublicKey,
+		PrivateKey:       req.PrivateKey,
 		Settings:         map[string]any{},
 		Stream:           map[string]any{},
 		Extra:            map[string]any{},
@@ -916,8 +916,26 @@ func buildLinks(in model.Inbound, r *http.Request) []string {
 			}
 			if hop, ok := hs["udphop"].(map[string]any); ok {
 				if ports, ok := hop["ports"].(string); ok && strings.TrimSpace(ports) != "" {
-					// Hysteria2 官方 URI：多端口写在 authority 的 port 部分
-					portPart = fmt.Sprintf("%d,%s", in.Port, strings.TrimSpace(ports))
+					// 与 x-ui 兼容：端口跳跃写入 mport，不再放 authority 多端口
+					query.Set("mport", strings.TrimSpace(ports))
+				}
+				if iv, ok := hop["interval"].(string); ok && strings.TrimSpace(iv) != "" {
+					ivs := strings.TrimSpace(iv)
+					if strings.Contains(ivs, "-") {
+						p := strings.SplitN(ivs, "-", 2)
+						if len(p) == 2 {
+							a := strings.TrimSpace(p[0])
+							b := strings.TrimSpace(p[1])
+							if _, errA := strconv.Atoi(a); errA == nil {
+								if _, errB := strconv.Atoi(b); errB == nil {
+									query.Set("udphopIntervalMin", a)
+									query.Set("udphopIntervalMax", b)
+								}
+							}
+						}
+					} else if _, err := strconv.Atoi(ivs); err == nil {
+						query.Set("udphopInterval", ivs)
+					}
 				}
 			}
 		}
@@ -1667,7 +1685,7 @@ func (a *App) handlePanelConnectSub(w http.ResponseWriter, r *http.Request) {
 		"success": true,
 		"msg":     "已写入到 sui-sub",
 		"obj": map[string]any{
-			"panelUrl":  panelBase,
+			"panelUrl":   panelBase,
 			"sourceName": req.SourceName,
 		},
 	})
@@ -1739,10 +1757,10 @@ func (a *App) handleViewBootstrap(w http.ResponseWriter, r *http.Request) {
 	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": map[string]any{
 		"panel": map[string]any{"username": p.Username, "panelPath": p.PanelPath, "forceResetPassword": false},
 		"status": map[string]any{
-			"panel":          panelSvc,
-			"xray":           xraySvc,
-			"xrayVersion":    xver["binary"],
-			"inboundsTotal":  len(rows),
+			"panel":           panelSvc,
+			"xray":            xraySvc,
+			"xrayVersion":     xver["binary"],
+			"inboundsTotal":   len(rows),
 			"inboundsEnabled": enabled,
 		},
 		"xrayVersion": xver,
