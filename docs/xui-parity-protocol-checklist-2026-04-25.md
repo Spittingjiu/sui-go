@@ -40,13 +40,13 @@
 - [x] tun：补与 x-ui 一致可配核心字段（name/mtu/stack/autoRoute/strictRoute/userLevel）
 
 ### D2. 参数校验与安全
-- [ ] 按协议建立字段白名单与类型约束（减少 override 误配，待做）
+- [x] 按协议建立字段白名单与类型约束（`settingsOverride`/`streamOverride` 已加白名单拦截）
 - [x] 端口冲突/保留端口校验
 - [x] 关键参数格式校验（uuid/shortId/sni/path 等）
 
 ### D3. 实测矩阵（持续）
-- [ ] 参数级矩阵（不仅协议+传输，还含高风险参数组合）
-- [ ] 每轮产出机读报告并入库 docs/
+- [x] 参数级矩阵（首版已落地，含高风险参数组合样例）
+- [x] 机读报告入库 docs/（已产出 `xui-parity-parameter-matrix-report-2026-04-25.json`）
 
 ## E. 本轮结论
 - 协议覆盖已全；新增节点自动生成能力已达标。
