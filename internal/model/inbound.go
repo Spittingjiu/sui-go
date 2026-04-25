@@ -29,6 +29,19 @@ type Inbound struct {
 	UpdateUnix       int64          `json:"updateUnix"`
 }
 
+type InboundLite struct {
+	ID         int64  `json:"id"`
+	Remark     string `json:"remark"`
+	Port       int    `json:"port"`
+	Protocol   string `json:"protocol"`
+	Network    string `json:"network,omitempty"`
+	Security   string `json:"security,omitempty"`
+	SNI        string `json:"sni,omitempty"`
+	Enable     bool   `json:"enable"`
+	CreateUnix int64  `json:"createUnix"`
+	UpdateUnix int64  `json:"updateUnix"`
+}
+
 type UserPassInput struct {
 	User string `json:"user"`
 	Pass string `json:"pass"`

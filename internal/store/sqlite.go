@@ -134,23 +134,23 @@ func (s *SQLiteStore) ListInbounds() ([]model.Inbound, error) {
 		_ = json.Unmarshal([]byte(r.Settings), &settings)
 		_ = json.Unmarshal([]byte(r.Stream), &stream)
 		out = append(out, model.Inbound{
-			ID:          int64(r.ID),
-			Remark:      r.Remark,
-			Port:        r.Port,
-			Protocol:    r.Protocol,
-			Password:    r.Password,
-			UUID:        r.UUID,
-			Email:       r.Email,
-			Method:      r.Method,
-			Flow:        r.Flow,
-			Network:     r.Network,
-			Security:    r.Security,
-			SNI:         r.SNI,
-			Host:        r.Host,
-			Path:        r.Path,
-			RealityDest: r.RealityDest,
-			ShortID:     r.ShortID,
-			PublicKey:   r.PublicKey,
+			ID:               int64(r.ID),
+			Remark:           r.Remark,
+			Port:             r.Port,
+			Protocol:         r.Protocol,
+			Password:         r.Password,
+			UUID:             r.UUID,
+			Email:            r.Email,
+			Method:           r.Method,
+			Flow:             r.Flow,
+			Network:          r.Network,
+			Security:         r.Security,
+			SNI:              r.SNI,
+			Host:             r.Host,
+			Path:             r.Path,
+			RealityDest:      r.RealityDest,
+			ShortID:          r.ShortID,
+			PublicKey:        r.PublicKey,
 			PrivateKey:       r.PrivateKey,
 			Enable:           r.Enable,
 			Settings:         settings,
@@ -162,6 +162,40 @@ func (s *SQLiteStore) ListInbounds() ([]model.Inbound, error) {
 		})
 	}
 	return out, nil
+}
+
+func (s *SQLiteStore) ListInboundsLite(limit, offset int) ([]model.InboundLite, int64, error) {
+	var total int64
+	if err := s.db.Model(&model.InboundDB{}).Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	q := s.db.Model(&model.InboundDB{}).Select("id, remark, port, protocol, network, security, sni, enable, created_at, updated_at").Order("id asc")
+	if limit > 0 {
+		q = q.Limit(limit)
+	}
+	if offset > 0 {
+		q = q.Offset(offset)
+	}
+	var rows []model.InboundDB
+	if err := q.Find(&rows).Error; err != nil {
+		return nil, 0, err
+	}
+	out := make([]model.InboundLite, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, model.InboundLite{
+			ID:         int64(r.ID),
+			Remark:     r.Remark,
+			Port:       r.Port,
+			Protocol:   r.Protocol,
+			Network:    r.Network,
+			Security:   r.Security,
+			SNI:        r.SNI,
+			Enable:     r.Enable,
+			CreateUnix: r.CreatedAt.Unix(),
+			UpdateUnix: r.UpdatedAt.Unix(),
+		})
+	}
+	return out, total, nil
 }
 
 func (s *SQLiteStore) GetInbound(id int64) (model.Inbound, bool, error) {
@@ -177,23 +211,23 @@ func (s *SQLiteStore) GetInbound(id int64) (model.Inbound, bool, error) {
 	_ = json.Unmarshal([]byte(r.Settings), &settings)
 	_ = json.Unmarshal([]byte(r.Stream), &stream)
 	return model.Inbound{
-		ID:          int64(r.ID),
-		Remark:      r.Remark,
-		Port:        r.Port,
-		Protocol:    r.Protocol,
-		Password:    r.Password,
-		UUID:        r.UUID,
-		Email:       r.Email,
-		Method:      r.Method,
-		Flow:        r.Flow,
-		Network:     r.Network,
-		Security:    r.Security,
-		SNI:         r.SNI,
-		Host:        r.Host,
-		Path:        r.Path,
-		RealityDest: r.RealityDest,
-		ShortID:     r.ShortID,
-		PublicKey:   r.PublicKey,
+		ID:               int64(r.ID),
+		Remark:           r.Remark,
+		Port:             r.Port,
+		Protocol:         r.Protocol,
+		Password:         r.Password,
+		UUID:             r.UUID,
+		Email:            r.Email,
+		Method:           r.Method,
+		Flow:             r.Flow,
+		Network:          r.Network,
+		Security:         r.Security,
+		SNI:              r.SNI,
+		Host:             r.Host,
+		Path:             r.Path,
+		RealityDest:      r.RealityDest,
+		ShortID:          r.ShortID,
+		PublicKey:        r.PublicKey,
 		PrivateKey:       r.PrivateKey,
 		Enable:           r.Enable,
 		Settings:         settings,
@@ -209,26 +243,26 @@ func (s *SQLiteStore) AddInbound(in model.Inbound) (model.Inbound, error) {
 	settings, _ := json.Marshal(in.Settings)
 	stream, _ := json.Marshal(in.Stream)
 	row := model.InboundDB{
-		Remark:      in.Remark,
-		Port:        in.Port,
-		Protocol:    in.Protocol,
-		Password:    in.Password,
-		UUID:        in.UUID,
-		Email:       in.Email,
-		Method:      in.Method,
-		Flow:        in.Flow,
-		Network:     in.Network,
-		Security:    in.Security,
-		SNI:         in.SNI,
-		Host:        in.Host,
-		Path:        in.Path,
-		RealityDest: in.RealityDest,
-		ShortID:     in.ShortID,
-		PublicKey:   in.PublicKey,
-		PrivateKey:  in.PrivateKey,
-		Enable:      in.Enable,
-		Settings:    string(settings),
-		Stream:      string(stream),
+		Remark:           in.Remark,
+		Port:             in.Port,
+		Protocol:         in.Protocol,
+		Password:         in.Password,
+		UUID:             in.UUID,
+		Email:            in.Email,
+		Method:           in.Method,
+		Flow:             in.Flow,
+		Network:          in.Network,
+		Security:         in.Security,
+		SNI:              in.SNI,
+		Host:             in.Host,
+		Path:             in.Path,
+		RealityDest:      in.RealityDest,
+		ShortID:          in.ShortID,
+		PublicKey:        in.PublicKey,
+		PrivateKey:       in.PrivateKey,
+		Enable:           in.Enable,
+		Settings:         string(settings),
+		Stream:           string(stream),
 		Tag:              fmt.Sprintf("inbound-%d", time.Now().UnixNano()),
 		SniffingEnabled:  in.SniffingEnabled,
 		SniffingOverride: in.SniffingOverride,

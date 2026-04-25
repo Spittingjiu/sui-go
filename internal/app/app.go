@@ -235,6 +235,28 @@ func (a *App) handleListInbounds(w http.ResponseWriter, r *http.Request) {
 		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
+	q := r.URL.Query()
+	lite := strings.EqualFold(strings.TrimSpace(q.Get("lite")), "1") || strings.EqualFold(strings.TrimSpace(q.Get("lite")), "true")
+	if lite {
+		limit, _ := strconv.Atoi(strings.TrimSpace(q.Get("limit")))
+		offset, _ := strconv.Atoi(strings.TrimSpace(q.Get("offset")))
+		if limit < 0 {
+			limit = 0
+		}
+		if limit > 1000 {
+			limit = 1000
+		}
+		if offset < 0 {
+			offset = 0
+		}
+		rows, total, err := a.store.ListInboundsLite(limit, offset)
+		if err != nil {
+			a.writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": rows, "total": total, "limit": limit, "offset": offset, "lite": true})
+		return
+	}
 	rows, err := a.store.ListInbounds()
 	if err != nil {
 		a.writeErr(w, http.StatusInternalServerError, err.Error())
@@ -1972,6 +1994,11 @@ func (a *App) handleXrayApply(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := os.MkdirAll(filepath.Dir(a.cfg.XrayConfigOut), 0o755); err != nil {
 		a.writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	existing, _ := os.ReadFile(a.cfg.XrayConfigOut)
+	if bytes.Equal(existing, b) {
+		a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "path": a.cfg.XrayConfigOut, "applied": false, "skipped": true, "msg": "config unchanged, skip reload"})
 		return
 	}
 	if err := os.WriteFile(a.cfg.XrayConfigOut, b, 0o644); err != nil {
