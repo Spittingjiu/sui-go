@@ -608,7 +608,7 @@ async function saveInbound(){
 
 async function loadList(){
   try{
-    const [ji,jf]=await Promise.all([api('/api/inbounds'), api('/api/forwards').catch(()=>({obj:[]}))]);
+    const [ji,jf]=await Promise.all([api('/api/inbounds?full=0&limit=1000'), api('/api/forwards').catch(()=>({obj:[]}))]);
     const rows=ji.obj||[];
     const forwards=jf.obj||[];
     cachedRows=rows;

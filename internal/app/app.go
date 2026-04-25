@@ -98,6 +98,7 @@ func (a *App) routes() {
 	a.mux.HandleFunc("/api/xray/export", a.handleXrayExport)
 	a.mux.HandleFunc("/api/xray/apply", a.handleXrayApply)
 	a.mux.HandleFunc("/api/xray/apply-events", a.handleXrayApplyEvents)
+	a.mux.HandleFunc("/api/xray/apply-stats", a.handleXrayApplyStats)
 
 	a.mux.HandleFunc("/api/forwards", a.handleForwards)
 	a.mux.HandleFunc("/api/forwards/", a.handleForwardsSub)
@@ -258,12 +259,33 @@ func (a *App) handleListInbounds(w http.ResponseWriter, r *http.Request) {
 		a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": rows, "total": total, "limit": limit, "offset": offset, "lite": true})
 		return
 	}
+	full := !strings.EqualFold(strings.TrimSpace(q.Get("full")), "0") && !strings.EqualFold(strings.TrimSpace(q.Get("full")), "false")
+	if !full {
+		limit, _ := strconv.Atoi(strings.TrimSpace(q.Get("limit")))
+		offset, _ := strconv.Atoi(strings.TrimSpace(q.Get("offset")))
+		if limit < 0 {
+			limit = 0
+		}
+		if limit > 1000 {
+			limit = 1000
+		}
+		if offset < 0 {
+			offset = 0
+		}
+		rows, total, err := a.store.ListInboundsLite(limit, offset)
+		if err != nil {
+			a.writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": rows, "total": total, "limit": limit, "offset": offset, "lite": true, "full": false})
+		return
+	}
 	rows, err := a.store.ListInbounds()
 	if err != nil {
 		a.writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": rows})
+	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": rows, "full": true})
 }
 
 func (a *App) handleAddInbound(w http.ResponseWriter, r *http.Request) {
@@ -2040,6 +2062,72 @@ func (a *App) handleXrayApplyEvents(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": out, "limit": limit})
+}
+
+func (a *App) handleXrayApplyStats(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !a.checkAuth(r) {
+		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	sinceMin, _ := strconv.Atoi(strings.TrimSpace(r.URL.Query().Get("sinceMin")))
+	if sinceMin <= 0 {
+		sinceMin = 60
+	}
+	if sinceMin > 1440 {
+		sinceMin = 1440
+	}
+	b, err := os.ReadFile("data/apply-events.jsonl")
+	if err != nil {
+		if os.IsNotExist(err) {
+			a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": map[string]any{"sinceMin": sinceMin, "total": 0, "ok": 0, "fail": 0, "skipped": 0, "rolledBack": 0, "successRate": 0}})
+			return
+		}
+		a.writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	cut := time.Now().Add(-time.Duration(sinceMin) * time.Minute).Unix()
+	total, okCnt, failCnt, skipped, rolledBack := 0, 0, 0, 0, 0
+	for _, ln := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+		ln = strings.TrimSpace(ln)
+		if ln == "" {
+			continue
+		}
+		var obj map[string]any
+		if err := json.Unmarshal([]byte(ln), &obj); err != nil {
+			continue
+		}
+		ts := int64(0)
+		switch v := obj["ts"].(type) {
+		case float64:
+			ts = int64(v)
+		case int64:
+			ts = v
+		}
+		if ts < cut {
+			continue
+		}
+		total++
+		if b, _ := obj["success"].(bool); b {
+			okCnt++
+		} else {
+			failCnt++
+		}
+		if b, _ := obj["skipped"].(bool); b {
+			skipped++
+		}
+		if b, _ := obj["rolledBack"].(bool); b {
+			rolledBack++
+		}
+	}
+	rate := 0.0
+	if total > 0 {
+		rate = float64(okCnt) * 100 / float64(total)
+	}
+	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": map[string]any{"sinceMin": sinceMin, "total": total, "ok": okCnt, "fail": failCnt, "skipped": skipped, "rolledBack": rolledBack, "successRate": rate}})
 }
 
 func (a *App) handleXrayApply(w http.ResponseWriter, r *http.Request) {
