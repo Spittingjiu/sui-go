@@ -1331,6 +1331,58 @@ var (
 	reHostLike = regexp.MustCompile(`^[A-Za-z0-9._:-]+$`)
 )
 
+var allowedOverrideSettingsKeys = map[string]map[string]struct{}{
+	"hysteria": {
+		"version": {}, "clients": {},
+	},
+	"vless": {
+		"clients": {}, "decryption": {}, "fallbacks": {},
+	},
+	"vmess": {
+		"clients": {}, "disableInsecureEncryption": {},
+	},
+	"trojan": {
+		"clients": {}, "fallbacks": {},
+	},
+	"shadowsocks": {
+		"method": {}, "password": {}, "network": {}, "clients": {}, "ivCheck": {},
+	},
+	"socks": {
+		"auth": {}, "accounts": {}, "udp": {}, "ip": {},
+	},
+	"http": {
+		"accounts": {}, "allowTransparent": {}, "timeout": {},
+	},
+	"dokodemo-door": {
+		"address": {}, "port": {}, "portMap": {}, "network": {}, "followRedirect": {},
+	},
+	"wireguard": {
+		"mtu": {}, "secretKey": {}, "peers": {}, "noKernelTun": {}, "reserved": {},
+	},
+	"tun": {
+		"name": {}, "mtu": {}, "stack": {}, "autoRoute": {}, "strictRoute": {}, "userLevel": {},
+	},
+}
+
+var allowedOverrideStreamKeys = map[string]struct{}{
+	"network": {}, "security": {}, "tlsSettings": {}, "realitySettings": {},
+	"grpcSettings": {}, "wsSettings": {}, "kcpSettings": {}, "xhttpSettings": {},
+	"httpupgradeSettings": {}, "hysteriaSettings": {}, "sockopt": {}, "quicSettings": {},
+}
+
+func hasUnknownKeys(patch map[string]any, allow map[string]struct{}) []string {
+	if len(patch) == 0 {
+		return nil
+	}
+	bad := make([]string, 0)
+	for k := range patch {
+		if _, ok := allow[k]; !ok {
+			bad = append(bad, k)
+		}
+	}
+	return bad
+}
+
 func validateAddInboundRequest(req model.AddInboundRequest) error {
 	if req.Port <= 0 || req.Port > 65535 {
 		return fmt.Errorf("invalid port")
@@ -1355,6 +1407,28 @@ func validateAddInboundRequest(req model.AddInboundRequest) error {
 	}
 	if p := strings.TrimSpace(req.Path); p != "" && !strings.HasPrefix(p, "/") {
 		return fmt.Errorf("path must start with /")
+	}
+
+	canonProto := proto
+	if canonProto == "ss" {
+		canonProto = "shadowsocks"
+	}
+	if canonProto == "dokodemo" {
+		canonProto = "dokodemo-door"
+	}
+	if len(req.SettingsOverride) > 0 {
+		allow := allowedOverrideSettingsKeys[canonProto]
+		if len(allow) == 0 {
+			return fmt.Errorf("settingsOverride not allowed for protocol %s", proto)
+		}
+		if bad := hasUnknownKeys(req.SettingsOverride, allow); len(bad) > 0 {
+			return fmt.Errorf("settingsOverride has unknown keys: %s", strings.Join(bad, ","))
+		}
+	}
+	if len(req.StreamOverride) > 0 {
+		if bad := hasUnknownKeys(req.StreamOverride, allowedOverrideStreamKeys); len(bad) > 0 {
+			return fmt.Errorf("streamOverride has unknown keys: %s", strings.Join(bad, ","))
+		}
 	}
 
 	switch proto {

@@ -1,0 +1,73 @@
+{
+  "name": "x-ui parity parameter matrix",
+  "date": "2026-04-25",
+  "target": "sui-go",
+  "items": [
+    {
+      "id": "vless-grpc-tls-fp",
+      "request": {
+        "protocol": "vless",
+        "network": "grpc",
+        "security": "tls",
+        "tlsAlpn": "h2",
+        "tlsFingerprint": "chrome",
+        "grpcServiceName": "svc",
+        "grpcAuthority": "a.example.com"
+      },
+      "expect": [
+        "streamSettings.network=grpc",
+        "streamSettings.tlsSettings.alpn includes h2",
+        "streamSettings.tlsSettings.fingerprint=chrome",
+        "streamSettings.grpcSettings.serviceName=svc",
+        "streamSettings.grpcSettings.authority=a.example.com"
+      ]
+    },
+    {
+      "id": "ss-2022-multiuser",
+      "request": {
+        "protocol": "shadowsocks",
+        "method": "2022-blake3-aes-128-gcm",
+        "ssClients": [
+          {"password": "c1"},
+          {"password": "c2"}
+        ],
+        "ssIvCheck": true
+      },
+      "expect": [
+        "settings.clients length=2",
+        "settings.clients[*].method absent",
+        "settings.ivCheck=true"
+      ]
+    },
+    {
+      "id": "wireguard-multi-peer",
+      "request": {
+        "protocol": "wireguard",
+        "wireguardNoKernelTun": true,
+        "wireguardPeers": [
+          {"publicKey": "pub1", "preSharedKey": "psk1", "allowedIPs": ["10.0.0.2/32"], "keepAlive": 25},
+          {"publicKey": "pub2", "allowedIPs": ["10.0.0.3/32"]}
+        ]
+      },
+      "expect": [
+        "settings.noKernelTun=true",
+        "settings.peers length=2",
+        "settings.peers[0].preSharedKey=psk1",
+        "settings.peers[0].keepAlive=25"
+      ]
+    },
+    {
+      "id": "override-whitelist-reject",
+      "request": {
+        "protocol": "vless",
+        "settingsOverride": {
+          "clients": [],
+          "badField": true
+        }
+      },
+      "expect": [
+        "validation error includes settingsOverride has unknown keys"
+      ]
+    }
+  ]
+}

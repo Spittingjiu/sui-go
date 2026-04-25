@@ -1,0 +1,56 @@
+{
+  "suite": "x-ui parity parameter matrix",
+  "date": "2026-04-25",
+  "total": 4,
+  "passed": 4,
+  "failed": 0,
+  "rows": [
+    {
+      "id": "vless-grpc-tls-fp",
+      "pass": true,
+      "actual": {
+        "network": "grpc",
+        "alpn": [
+          "h2"
+        ],
+        "fp": "chrome",
+        "svc": "svc",
+        "auth": "a.example.com"
+      }
+    },
+    {
+      "id": "ss-2022-multiuser",
+      "pass": true,
+      "actual": {
+        "clients_len": 2,
+        "c0": {
+          "password": "c1"
+        },
+        "ivCheck": true
+      }
+    },
+    {
+      "id": "wireguard-multi-peer",
+      "pass": true,
+      "actual": {
+        "noKernelTun": true,
+        "peers_len": 2,
+        "p0": {
+          "allowedIPs": [
+            "10.0.0.2/32"
+          ],
+          "keepAlive": 25,
+          "preSharedKey": "psk1",
+          "publicKey": "pub1"
+        }
+      }
+    },
+    {
+      "id": "override-whitelist-reject",
+      "pass": true,
+      "actual": {
+        "msg": "settingsOverride has unknown keys: badField"
+      }
+    }
+  ]
+}
