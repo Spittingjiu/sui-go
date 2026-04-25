@@ -319,12 +319,25 @@ let token = localStorage.getItem('sui_go_token') || '';
 const $ = id => document.getElementById(id);
 let cachedRows = [];
 
+function fmtRetry(ts){
+  if(!ts) return '';
+  const ms = Number(ts)*1000 - Date.now();
+  if(ms<=0) return '可立即重试';
+  const sec = Math.ceil(ms/1000);
+  const m = Math.floor(sec/60), s = sec%60;
+  return `请在 ${m>0?m+'分':''}${s}秒后重试`;
+}
+
 async function api(url, opt={}){
   const h = Object.assign({'content-type':'application/json'}, opt.headers||{});
   if(token) h['Authorization'] = 'Bearer ' + token;
   const r = await fetch(url, {...opt, headers:h});
   const j = await r.json().catch(()=>({success:false,msg:'invalid json'}));
-  if(!r.ok) throw new Error(j.msg || ('http '+r.status));
+  if(!r.ok){
+    const err = new Error(j.msg || ('http '+r.status));
+    err.data = j;
+    throw err;
+  }
   return j;
 }
 
@@ -372,9 +385,16 @@ async function doLogin(){
     const j = await api('/auth/login', {method:'POST', body: JSON.stringify({username:$('u').value,password:$('p').value})});
     token = j.token || '';
     localStorage.setItem('sui_go_token', token);
+    $('p').value='';
     setStatus('已登录');
     await loadList();
-  }catch(e){ setStatus('登录失败: '+e.message, false); }
+  }catch(e){
+    let msg = e.message || '登录失败';
+    if(e && e.data && e.data.retryAfterUnix){
+      msg = '登录受限：' + fmtRetry(e.data.retryAfterUnix);
+    }
+    setStatus('登录失败: '+msg, false);
+  }
 }
 
 async function doRefresh(){
@@ -768,6 +788,8 @@ if(token){
   setStatus('检测到本地 token，可直接操作');
   loadList();
 }
+$('p').addEventListener('keydown', (e)=>{ if(e.key==='Enter') doLogin(); });
+$('u').addEventListener('keydown', (e)=>{ if(e.key==='Enter') doLogin(); });
 </script>
 </body>
 </html>

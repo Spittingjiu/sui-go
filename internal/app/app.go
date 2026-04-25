@@ -136,6 +136,52 @@ func (a *App) handleHealth(w http.ResponseWriter, r *http.Request) {
 	a.writeJSON(w, http.StatusOK, map[string]any{"ok": true, "mode": "sui-go"})
 }
 
+func clientIP(r *http.Request) string {
+	if xff := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); xff != "" {
+		parts := strings.Split(xff, ",")
+		if len(parts) > 0 {
+			return strings.TrimSpace(parts[0])
+		}
+	}
+	if xr := strings.TrimSpace(r.Header.Get("X-Real-IP")); xr != "" {
+		return xr
+	}
+	host, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr))
+	if err == nil {
+		return host
+	}
+	return strings.TrimSpace(r.RemoteAddr)
+}
+
+func (a *App) setAuthCookie(w http.ResponseWriter, token string, expiresAt time.Time) {
+	if strings.TrimSpace(token) == "" {
+		return
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     "sui_go_token",
+		Value:    token,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   false,
+		SameSite: http.SameSiteLaxMode,
+		Expires:  expiresAt,
+		MaxAge:   int(time.Until(expiresAt).Seconds()),
+	})
+}
+
+func (a *App) clearAuthCookie(w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     "sui_go_token",
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   false,
+		SameSite: http.SameSiteLaxMode,
+		Expires:  time.Unix(0, 0),
+		MaxAge:   -1,
+	})
+}
+
 func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -149,12 +195,29 @@ func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
 		a.writeErr(w, http.StatusBadRequest, "invalid json")
 		return
 	}
-	ok, err := a.store.CheckUser(req.Username, req.Password)
+	req.Username = strings.TrimSpace(req.Username)
+	if req.Username == "" {
+		a.writeErr(w, http.StatusBadRequest, "username required")
+		return
+	}
+	if strings.TrimSpace(req.Password) == "" {
+		a.writeErr(w, http.StatusBadRequest, "password required")
+		return
+	}
+	ok, lockedUntil, err := a.store.CheckUser(req.Username, req.Password)
 	if err != nil {
 		a.writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if !ok {
+		if !lockedUntil.IsZero() && lockedUntil.After(time.Now()) {
+			a.writeJSON(w, http.StatusTooManyRequests, map[string]any{
+				"success":        false,
+				"msg":            "too many failed attempts, please retry later",
+				"retryAfterUnix": lockedUntil.Unix(),
+			})
+			return
+		}
 		a.writeErr(w, http.StatusUnauthorized, "invalid username/password")
 		return
 	}
@@ -164,6 +227,8 @@ func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
 		a.writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	a.setAuthCookie(w, tok, expiresAt)
+	a.appendApplyEvent(map[string]any{"ts": time.Now().Unix(), "event": "auth_login", "success": true, "user": req.Username, "ip": clientIP(r)})
 	a.writeJSON(w, http.StatusOK, map[string]any{
 		"success":     true,
 		"token":       tok,
@@ -190,6 +255,7 @@ func (a *App) handleRefresh(w http.ResponseWriter, r *http.Request) {
 		a.writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	a.setAuthCookie(w, newTok, expiresAt)
 	a.writeJSON(w, http.StatusOK, map[string]any{
 		"success":     true,
 		"token":       newTok,
@@ -203,15 +269,18 @@ func (a *App) handleLogout(w http.ResponseWriter, r *http.Request) {
 		a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	tok, _, ok := a.extractAuth(r)
+	tok, user, ok := a.extractAuth(r)
 	if !ok {
-		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
+		a.clearAuthCookie(w)
+		a.writeJSON(w, http.StatusOK, map[string]any{"success": true})
 		return
 	}
 	if err := a.store.DeleteToken(tok); err != nil {
 		a.writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	a.clearAuthCookie(w)
+	a.appendApplyEvent(map[string]any{"ts": time.Now().Unix(), "event": "auth_logout", "success": true, "user": user, "ip": clientIP(r)})
 	a.writeJSON(w, http.StatusOK, map[string]any{"success": true})
 }
 
@@ -1049,12 +1118,20 @@ func buildInboundFromReq(req model.AddInboundRequest) (model.Inbound, error) {
 }
 
 func (a *App) extractAuth(r *http.Request) (token, username string, ok bool) {
+	tok := ""
 	h := strings.TrimSpace(r.Header.Get("Authorization"))
 	parts := strings.Fields(h)
-	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
+	if len(parts) == 2 && strings.EqualFold(parts[0], "Bearer") {
+		tok = strings.TrimSpace(parts[1])
+	}
+	if tok == "" {
+		if c, err := r.Cookie("sui_go_token"); err == nil {
+			tok = strings.TrimSpace(c.Value)
+		}
+	}
+	if tok == "" {
 		return "", "", false
 	}
-	tok := strings.TrimSpace(parts[1])
 	user, valid, err := a.store.ValidateToken(tok, time.Now())
 	if err != nil || !valid {
 		return "", "", false

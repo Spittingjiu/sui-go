@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/Spittingjiu/sui-go/internal/model"
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -91,6 +93,26 @@ func (s *SQLiteStore) RotateAPIToken(token string) (model.PanelSettingDB, error)
 	return p, nil
 }
 
+func isBcryptHash(s string) bool {
+	s = strings.TrimSpace(s)
+	return strings.HasPrefix(s, "$2a$") || strings.HasPrefix(s, "$2b$") || strings.HasPrefix(s, "$2y$")
+}
+
+func checkPassword(stored, input string) bool {
+	if isBcryptHash(stored) {
+		return bcrypt.CompareHashAndPassword([]byte(stored), []byte(input)) == nil
+	}
+	return stored == input
+}
+
+func hashPassword(raw string) (string, error) {
+	b, err := bcrypt.GenerateFromPassword([]byte(raw), bcrypt.DefaultCost)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
 func (s *SQLiteStore) EnsureDefaultUser(username, password string) error {
 	var cnt int64
 	if err := s.db.Model(&model.UserDB{}).Where("username = ?", username).Count(&cnt).Error; err != nil {
@@ -99,7 +121,11 @@ func (s *SQLiteStore) EnsureDefaultUser(username, password string) error {
 	if cnt > 0 {
 		return nil
 	}
-	u := model.UserDB{Username: username, Password: password}
+	hash, err := hashPassword(password)
+	if err != nil {
+		return err
+	}
+	u := model.UserDB{Username: username, Password: hash}
 	return s.db.Create(&u).Error
 }
 
@@ -112,26 +138,67 @@ func (s *SQLiteStore) ChangeUserPassword(username, oldPassword, newPassword stri
 		}
 		return false, err
 	}
-	if u.Password != oldPassword {
+	if !checkPassword(u.Password, oldPassword) {
 		return false, nil
 	}
-	u.Password = newPassword
+	hash, err := hashPassword(newPassword)
+	if err != nil {
+		return false, err
+	}
+	now := time.Now()
+	u.Password = hash
+	u.FailedLogins = 0
+	u.LockedUntil = time.Time{}
+	u.LastLoginAt = now
 	if err := s.db.Save(&u).Error; err != nil {
 		return false, err
 	}
 	return true, nil
 }
 
-func (s *SQLiteStore) CheckUser(username, password string) (bool, error) {
+func (s *SQLiteStore) CheckUser(username, password string) (bool, time.Time, error) {
 	var u model.UserDB
 	err := s.db.Where("username = ?", username).First(&u).Error
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
-			return false, nil
+			return false, time.Time{}, nil
 		}
-		return false, err
+		return false, time.Time{}, err
 	}
-	return u.Password == password, nil
+	now := time.Now()
+	if !u.LockedUntil.IsZero() && u.LockedUntil.After(now) {
+		return false, u.LockedUntil, nil
+	}
+	if !checkPassword(u.Password, password) {
+		failed := u.FailedLogins + 1
+		lockUntil := time.Time{}
+		if failed >= 5 {
+			lockUntil = now.Add(15 * time.Minute)
+		}
+		if err := s.db.Model(&u).Updates(map[string]any{
+			"failed_logins": failed,
+			"locked_until":  lockUntil,
+		}).Error; err != nil {
+			return false, time.Time{}, err
+		}
+		return false, lockUntil, nil
+	}
+	updates := map[string]any{
+		"failed_logins": 0,
+		"locked_until":  time.Time{},
+		"last_login_at": now,
+	}
+	if !isBcryptHash(u.Password) {
+		hash, herr := hashPassword(password)
+		if herr != nil {
+			return false, time.Time{}, herr
+		}
+		updates["password"] = hash
+	}
+	if err := s.db.Model(&u).Updates(updates).Error; err != nil {
+		return false, time.Time{}, err
+	}
+	return true, time.Time{}, nil
 }
 
 func (s *SQLiteStore) ListInbounds() ([]model.Inbound, error) {
