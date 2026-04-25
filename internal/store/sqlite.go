@@ -10,6 +10,7 @@ import (
 	"github.com/Spittingjiu/sui-go/internal/model"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type SQLiteStore struct {
@@ -32,6 +33,14 @@ func NewSQLite(dbPath string) (*SQLiteStore, error) {
 	_ = db.Exec("CREATE INDEX IF NOT EXISTS idx_inbound_dbs_port ON inbound_dbs(port)").Error
 	_ = db.Exec("CREATE INDEX IF NOT EXISTS idx_inbound_dbs_protocol ON inbound_dbs(protocol)").Error
 	_ = db.Exec("CREATE INDEX IF NOT EXISTS idx_inbound_dbs_enable ON inbound_dbs(enable)").Error
+	_ = db.Exec("PRAGMA journal_mode=WAL").Error
+	_ = db.Exec("PRAGMA synchronous=NORMAL").Error
+	if sqldb, err := db.DB(); err == nil {
+		sqldb.SetMaxOpenConns(64)
+		sqldb.SetMaxIdleConns(16)
+		sqldb.SetConnMaxLifetime(30 * time.Minute)
+		sqldb.SetConnMaxIdleTime(10 * time.Minute)
+	}
 	return &SQLiteStore{db: db}, nil
 }
 
@@ -242,10 +251,10 @@ func (s *SQLiteStore) GetInbound(id int64) (model.Inbound, bool, error) {
 	}, true, nil
 }
 
-func (s *SQLiteStore) AddInbound(in model.Inbound) (model.Inbound, error) {
+func inboundToDBRow(in model.Inbound) model.InboundDB {
 	settings, _ := json.Marshal(in.Settings)
 	stream, _ := json.Marshal(in.Stream)
-	row := model.InboundDB{
+	return model.InboundDB{
 		Remark:           in.Remark,
 		Port:             in.Port,
 		Protocol:         in.Protocol,
@@ -270,6 +279,10 @@ func (s *SQLiteStore) AddInbound(in model.Inbound) (model.Inbound, error) {
 		SniffingEnabled:  in.SniffingEnabled,
 		SniffingOverride: in.SniffingOverride,
 	}
+}
+
+func (s *SQLiteStore) AddInbound(in model.Inbound) (model.Inbound, error) {
+	row := inboundToDBRow(in)
 	if err := s.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(&row).Error; err != nil {
 			return err
@@ -289,6 +302,33 @@ func (s *SQLiteStore) AddInbound(in model.Inbound) (model.Inbound, error) {
 	in.CreateUnix = row.CreatedAt.Unix()
 	in.UpdateUnix = row.UpdatedAt.Unix()
 	return in, nil
+}
+
+func (s *SQLiteStore) AddInboundsBatch(items []model.Inbound) ([]model.Inbound, error) {
+	if len(items) == 0 {
+		return []model.Inbound{}, nil
+	}
+	rows := make([]model.InboundDB, 0, len(items))
+	for _, in := range items {
+		rows = append(rows, inboundToDBRow(in))
+	}
+	if err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.OnConflict{DoNothing: false}).CreateInBatches(&rows, 100).Error; err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	out := make([]model.Inbound, 0, len(rows))
+	for i, r := range rows {
+		in := items[i]
+		in.ID = int64(r.ID)
+		in.CreateUnix = r.CreatedAt.Unix()
+		in.UpdateUnix = r.UpdatedAt.Unix()
+		out = append(out, in)
+	}
+	return out, nil
 }
 
 func (s *SQLiteStore) UpdateInbound(id int64, in model.Inbound) (model.Inbound, bool, error) {

@@ -89,6 +89,7 @@ func (a *App) routes() {
 
 	a.mux.HandleFunc("/api/inbounds", a.handleListInbounds)
 	a.mux.HandleFunc("/api/inbounds/add", a.handleAddInbound)
+	a.mux.HandleFunc("/api/inbounds/add-batch", a.handleAddInboundsBatch)
 	a.mux.HandleFunc("/api/inbounds/add-reality-quick", a.handleAddRealityQuick)
 	a.mux.HandleFunc("/api/inbounds/", a.handleInboundSub)
 	a.mux.HandleFunc("/api/inbounds/next-port", a.handleNextPort)
@@ -286,6 +287,52 @@ func (a *App) handleListInbounds(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": rows, "full": true})
+}
+
+func (a *App) handleAddInboundsBatch(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !a.checkAuth(r) {
+		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	var body struct {
+		Items []model.AddInboundRequest `json:"items"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		a.writeErr(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	if len(body.Items) == 0 {
+		a.writeErr(w, http.StatusBadRequest, "items required")
+		return
+	}
+	if len(body.Items) > 200 {
+		a.writeErr(w, http.StatusBadRequest, "items too many (max 200)")
+		return
+	}
+	prepared := make([]model.Inbound, 0, len(body.Items))
+	for i, req := range body.Items {
+		norm, err := a.normalizeAddInboundRequest(req)
+		if err != nil {
+			a.writeErr(w, http.StatusBadRequest, fmt.Sprintf("item[%d]: %v", i, err))
+			return
+		}
+		in, err := buildInboundFromReq(norm)
+		if err != nil {
+			a.writeErr(w, http.StatusBadRequest, fmt.Sprintf("item[%d]: %v", i, err))
+			return
+		}
+		prepared = append(prepared, in)
+	}
+	created, err := a.store.AddInboundsBatch(prepared)
+	if err != nil {
+		a.writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "count": len(created), "obj": created})
 }
 
 func (a *App) handleAddInbound(w http.ResponseWriter, r *http.Request) {
