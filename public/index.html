@@ -137,6 +137,13 @@
             <button id="load" class="ghost">刷新数据</button>
             <button id="updatePanel" class="ghost">更新面板</button>
           </div>
+          <div class="row" style="margin-top:10px">
+            <input id="subUrl" class="w-xl" placeholder="sui-sub 地址（如 https://sub.zzao.de）" />
+            <input id="subUser" class="w-md" placeholder="sui-sub 用户名" />
+            <input id="subPass" class="w-md" placeholder="sui-sub 密码" type="password" />
+            <input id="subSourceName" class="w-md" placeholder="源名称（默认 sui-go）" value="sui-go" />
+            <button id="connectSub">对接 SUB</button>
+          </div>
           <div class="stats" style="margin-top:10px">
             <div class="stat"><div class="k">Inbound 总数</div><div class="v" id="stTotal">0</div></div>
             <div class="stat"><div class="k">启用数量</div><div class="v" id="stEnabled">0</div></div>
@@ -155,6 +162,12 @@
               <option value="vmess">vmess</option>
               <option value="trojan">trojan</option>
               <option value="shadowsocks">shadowsocks</option>
+              <option value="socks">socks</option>
+              <option value="http">http</option>
+              <option value="dokodemo-door">dokodemo-door</option>
+              <option value="wireguard">wireguard</option>
+              <option value="tun">tun</option>
+              <option value="forward">port-forward</option>
             </select>
             <input id="remark" class="w-lg" placeholder="remark" value="hy2-mvp" />
             <input id="port" class="w-sm" placeholder="port" value="24433" />
@@ -193,6 +206,42 @@
             <input id="hyNet" class="w-md" placeholder="network(hysteria)" value="hysteria" />
           </div>
 
+          <div id="f-forward" class="row hidden">
+            <input id="fTargetHost" class="w-lg" placeholder="targetHost (如 1.1.1.1)" />
+            <input id="fTargetPort" class="w-sm" placeholder="targetPort" />
+            <select id="fwdProto" class="w-md">
+              <option value="tcp">forward tcp</option>
+              <option value="udp">forward udp</option>
+              <option value="both">forward tcp+udp</option>
+            </select>
+          </div>
+
+          <div id="f-auth" class="row hidden">
+            <select id="authMode" class="w-md">
+              <option value="noauth">auth noauth</option>
+              <option value="password">auth password</option>
+            </select>
+            <input id="accUser" class="w-md" placeholder="accountUser" />
+            <input id="accPass" class="w-md" placeholder="accountPass" />
+          </div>
+
+          <div id="f-dokodemo" class="row hidden">
+            <input id="dokoAddr" class="w-lg" placeholder="targetAddress (如 1.1.1.1)" />
+            <input id="dokoPort" class="w-sm" placeholder="targetPort" />
+          </div>
+
+          <div id="f-wireguard" class="row hidden">
+            <input id="wgSecret" class="w-xl" placeholder="wireguard secretKey" />
+            <input id="wgAddr" class="w-md" placeholder="peer allowedIPs (如 10.0.0.2/32)" />
+            <input id="wgMtu" class="w-sm" placeholder="wireguard mtu" value="1420" />
+          </div>
+
+          <div id="f-tun" class="row hidden">
+            <input id="tunName" class="w-md" placeholder="tun name" value="xray0" />
+            <input id="tunMtu" class="w-sm" placeholder="tun mtu" value="1500" />
+            <input id="tunStack" class="w-md" placeholder="tun stack" value="system" />
+          </div>
+
           <div class="row">
             <button id="add">新增</button>
             <button id="save">保存 /full</button>
@@ -221,6 +270,20 @@
           <pre id="cfgOut"></pre>
         </section>
       </main>
+    </div>
+  </div>
+
+  <div id="qrModal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:99;display:flex;align-items:center;justify-content:center">
+    <div class="card" style="width:min(520px,92vw)">
+      <h3>节点二维码</h3>
+      <div class="row" style="justify-content:center">
+        <img id="qrImg" alt="QR" style="width:220px;height:220px;border-radius:12px;border:1px solid var(--line);background:#fff" />
+      </div>
+      <div class="row" style="margin-top:10px">
+        <input id="qrLink" style="flex:1" readonly />
+        <button id="copyQrLink" class="ghost">复制链接</button>
+        <button id="closeQr" class="ghost">关闭</button>
+      </div>
     </div>
   </div>
 
@@ -270,6 +333,11 @@ function updateFieldVisibility(){
   $('f-ss').classList.toggle('hidden', p!=='shadowsocks');
   $('f-secret').classList.toggle('hidden', !(p==='hysteria' || p==='trojan' || p==='shadowsocks'));
   $('f-reality').classList.toggle('hidden', !(p==='vless' && sec==='reality'));
+  $('f-forward').classList.toggle('hidden', p!=='forward');
+  $('f-auth').classList.toggle('hidden', !(p==='socks' || p==='http'));
+  $('f-dokodemo').classList.toggle('hidden', !(p==='dokodemo-door' || p==='dokodemo'));
+  $('f-wireguard').classList.toggle('hidden', p!=='wireguard');
+  $('f-tun').classList.toggle('hidden', p!=='tun');
 }
 
 async function doLogin(){
@@ -299,6 +367,16 @@ async function doLogout(){
 
 function getPayload(){
   const proto=$('proto').value;
+  if(proto==='forward'){
+    return {
+      remark:$('remark').value,
+      listenPort:Number($('port').value),
+      targetHost:($('fTargetHost').value||'').trim(),
+      targetPort:Number($('fTargetPort').value),
+      protocol:($('fwdProto').value||'tcp').trim(),
+      enable:true,
+    };
+  }
   return {
     remark:$('remark').value,
     port:Number($('port').value),
@@ -315,15 +393,29 @@ function getPayload(){
     publicKey:$('publicKey').value,
     sni:$('sni').value,
     hy2HopPorts:$('hopPorts').value,
-    hy2HopInterval:$('hopInt').value
+    hy2HopInterval:$('hopInt').value,
+    auth:($('authMode').value||'').trim(),
+    accountUser:($('accUser').value||'').trim(),
+    accountPass:($('accPass').value||''),
+    targetAddress:($('dokoAddr').value||'').trim(),
+    targetPort:Number($('dokoPort').value||0),
+    wireguardSecretKey:($('wgSecret').value||'').trim(),
+    wireguardAddress:($('wgAddr').value||'').trim(),
+    wireguardMtu:Number($('wgMtu').value||0),
+    tunName:($('tunName').value||'').trim(),
+    tunMtu:Number($('tunMtu').value||0),
+    tunStack:($('tunStack').value||'').trim(),
+    tunAutoRoute:true,
+    tunStrictRoute:false
   };
 }
 
 function fillForm(x){
+  const isForward = x.listenPort!==undefined || x.targetHost!==undefined;
   $('id').value = x.id || '';
-  $('proto').value = x.protocol || 'hysteria';
+  $('proto').value = isForward ? 'forward' : (x.protocol || 'hysteria');
   $('remark').value = x.remark || '';
-  $('port').value = x.port || '';
+  $('port').value = x.port || x.listenPort || '';
   $('uuid').value = x.uuid || '';
   $('pwd').value = x.password || '';
   $('method').value = x.method || 'aes-128-gcm';
@@ -336,6 +428,21 @@ function fillForm(x){
   $('shortId').value = x.shortId || '';
   $('publicKey').value = x.publicKey || '';
   $('sni').value = x.sni || '';
+  $('fTargetHost').value = x.targetHost || '';
+  $('fTargetPort').value = x.targetPort || '';
+  $('fwdProto').value = isForward ? (x.protocol||'tcp') : 'tcp';
+  $('authMode').value = x?.settings?.auth || 'noauth';
+  const acc = (x?.settings?.accounts||[])[0] || {};
+  $('accUser').value = acc.user || '';
+  $('accPass').value = acc.pass || '';
+  $('dokoAddr').value = x?.settings?.address || '';
+  $('dokoPort').value = x?.settings?.port || '';
+  $('wgSecret').value = x?.settings?.secretKey || '';
+  $('wgMtu').value = x?.settings?.mtu || 1420;
+  $('wgAddr').value = ((x?.settings?.peers||[])[0]?.allowedIPs||[])[0] || '';
+  $('tunName').value = x?.settings?.name || 'xray0';
+  $('tunMtu').value = x?.settings?.mtu || 1500;
+  $('tunStack').value = x?.settings?.stack || 'system';
   const hop = (((x.streamSettings||{}).hysteriaSettings||{}).udphop)||{};
   $('hopPorts').value = hop.ports || '';
   $('hopInt').value = hop.interval || '';
@@ -359,14 +466,30 @@ function resetForm(){
   $('shortId').value='';
   $('publicKey').value='';
   $('sni').value='www.bing.com';
+  $('fTargetHost').value='';
+  $('fTargetPort').value='';
+  $('fwdProto').value='tcp';
+  $('authMode').value='noauth';
+  $('accUser').value='';
+  $('accPass').value='';
+  $('dokoAddr').value='1.1.1.1';
+  $('dokoPort').value='53';
+  $('wgSecret').value='';
+  $('wgAddr').value='10.0.0.2/32';
+  $('wgMtu').value='1420';
+  $('tunName').value='xray0';
+  $('tunMtu').value='1500';
+  $('tunStack').value='system';
   $('hopPorts').value='25000-25010';
   $('hopInt').value='20-40';
   updateFieldVisibility();
 }
 
 async function addInbound(){
+  const proto=$('proto').value;
   try{
-    const j=await api('/api/inbounds/add',{method:'POST',body:JSON.stringify(getPayload())});
+    const url = proto==='forward' ? '/api/forwards' : '/api/inbounds/add';
+    const j=await api(url,{method:'POST',body:JSON.stringify(getPayload())});
     $('addOut').textContent=JSON.stringify(j,null,2);
     fillForm(j.obj||{});
     await loadList();
@@ -376,8 +499,10 @@ async function addInbound(){
 async function saveInbound(){
   const id = Number($('id').value||0);
   if(!id){ $('addOut').textContent='请先选择一条记录再保存'; return; }
+  const proto=$('proto').value;
   try{
-    const j=await api(`/api/inbounds/${id}/full`,{method:'PUT',body:JSON.stringify(getPayload())});
+    const url = proto==='forward' ? `/api/forwards/${id}` : `/api/inbounds/${id}/full`;
+    const j=await api(url,{method:'PUT',body:JSON.stringify(getPayload())});
     $('addOut').textContent=JSON.stringify(j,null,2);
     fillForm(j.obj||{});
     await loadList();
@@ -386,11 +511,14 @@ async function saveInbound(){
 
 async function loadList(){
   try{
-    const j=await api('/api/inbounds');
-    const rows=j.obj||[];
+    const [ji,jf]=await Promise.all([api('/api/inbounds'), api('/api/forwards').catch(()=>({obj:[]}))]);
+    const rows=ji.obj||[];
+    const forwards=jf.obj||[];
     cachedRows=rows;
     syncStats(rows);
-    $('tb').innerHTML = rows.map(x=>`<tr><td>${x.id}</td><td>${x.remark||''}</td><td><span class="tag">${x.protocol||''}</span></td><td>${x.port||''}</td><td>${x.enable===false?'<span class="err">禁用</span>':'<span class="ok">启用</span>'}</td><td><div class="ops"><button class="ghost" onclick="pickInbound(${x.id})">编辑</button><button class="danger" onclick="removeInbound(${x.id})">删除</button><button class="ghost" onclick="loadLinks(${x.id})">links</button></div></td></tr>`).join('');
+    const inboundHtml = rows.map(x=>`<tr><td>${x.id}</td><td>${x.remark||''}</td><td><span class="tag">${x.protocol||''}</span></td><td>${x.port||''}</td><td>${x.enable===false?'<span class="err">禁用</span>':'<span class="ok">启用</span>'}</td><td><div class="ops"><button class="ghost" onclick="pickInbound(${x.id})">编辑</button><button class="danger" onclick="removeInbound(${x.id})">删除</button><button class="ghost" onclick="loadLinks(${x.id})">links</button><button class="ghost" onclick="showQR(${x.id})">二维码</button></div></td></tr>`).join('');
+    const forwardHtml = forwards.map(x=>`<tr><td>F-${x.id}</td><td>${x.remark||''}</td><td><span class="tag">forward/${x.protocol||'tcp'}</span></td><td>${x.listenPort||''}</td><td>${x.enable===false?'<span class="err">禁用</span>':'<span class="ok">启用</span>'}</td><td><div class="ops"><button class="ghost" onclick="pickForward(${x.id})">编辑</button><button class="danger" onclick="removeForward(${x.id})">删除</button></div></td></tr>`).join('');
+    $('tb').innerHTML = inboundHtml + forwardHtml;
   }catch(e){ $('tb').innerHTML=`<tr><td colspan="6" class="err">${e.message}</td></tr>`; }
 }
 
@@ -398,15 +526,36 @@ async function pickInbound(id){
   try{
     const j=await api(`/api/inbounds/${id}/full`);
     fillForm(j.obj||{});
-    $('addOut').textContent='已载入 ID='+id+'，可修改后点保存';
+    $('addOut').textContent='已载入 Inbound ID='+id+'，可修改后点保存';
+    switchSection('sec-editor');
+  }catch(e){ $('addOut').textContent='读取失败: '+e.message; }
+}
+
+async function pickForward(id){
+  try{
+    const j=await api('/api/forwards');
+    const row=(j.obj||[]).find(x=>Number(x.id)===Number(id));
+    if(!row) throw new Error('forward not found');
+    fillForm(row);
+    $('addOut').textContent='已载入 Forward ID='+id+'，可修改后点保存';
     switchSection('sec-editor');
   }catch(e){ $('addOut').textContent='读取失败: '+e.message; }
 }
 
 async function removeInbound(id){
-  if(!confirm('确认删除 ID='+id+' ?')) return;
+  if(!confirm('确认删除 Inbound ID='+id+' ?')) return;
   try{
     const j=await api(`/api/inbounds/${id}`, {method:'DELETE'});
+    $('addOut').textContent=JSON.stringify(j,null,2);
+    if(Number($('id').value||0)===id) resetForm();
+    await loadList();
+  }catch(e){ $('addOut').textContent='删除失败: '+e.message; }
+}
+
+async function removeForward(id){
+  if(!confirm('确认删除 Forward ID='+id+' ?')) return;
+  try{
+    const j=await api(`/api/forwards/${id}`, {method:'DELETE'});
     $('addOut').textContent=JSON.stringify(j,null,2);
     if(Number($('id').value||0)===id) resetForm();
     await loadList();
@@ -419,6 +568,35 @@ async function loadLinks(id){
     $('linkOut').textContent = (j.obj||[]).join('\n');
     switchSection('sec-list');
   }catch(e){ $('linkOut').textContent='读取链接失败: '+e.message; }
+}
+
+async function showQR(id){
+  try{
+    const j=await api(`/api/inbounds/${id}/qr`);
+    const link=String(j?.obj?.link||j?.obj?.qrcode||'').trim();
+    if(!link) throw new Error('空链接');
+    $('qrLink').value = link;
+    $('qrImg').src = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(link)}`;
+    $('qrModal').classList.remove('hidden');
+  }catch(e){ $('linkOut').textContent='二维码生成失败: '+e.message; }
+}
+
+async function connectSub(){
+  try{
+    const body={
+      subUrl: ($('subUrl').value||'').trim(),
+      subUsername: ($('subUser').value||'').trim(),
+      subPassword: ($('subPass').value||''),
+      sourceName: ($('subSourceName').value||'').trim() || 'sui-go',
+    };
+    const j=await api('/api/panel/connect-sub',{method:'POST',body:JSON.stringify(body)});
+    $('cfgOut').textContent=JSON.stringify(j,null,2);
+    $('subPass').value='';
+    setStatus('SUB 对接成功', true);
+  }catch(e){
+    $('cfgOut').textContent='SUB 对接失败: '+e.message;
+    setStatus('SUB 对接失败', false);
+  }
 }
 
 async function showCfg(){
@@ -466,14 +644,20 @@ $('cfgShow').onclick=showCfg;
 $('cfgExport').onclick=exportCfg;
 $('cfgApply').onclick=applyCfg;
 $('updatePanel').onclick=updatePanel;
+$('connectSub').onclick=connectSub;
+$('copyQrLink').onclick=async()=>{ try{ await navigator.clipboard.writeText($('qrLink').value||''); }catch{} };
+$('closeQr').onclick=()=>$('qrModal').classList.add('hidden');
 $('proto').onchange=updateFieldVisibility;
 $('sec').onchange=updateFieldVisibility;
 
 document.querySelectorAll('.nav-btn').forEach(btn=>btn.onclick=()=>switchSection(btn.dataset.target));
 
 window.pickInbound = pickInbound;
+window.pickForward = pickForward;
 window.removeInbound = removeInbound;
+window.removeForward = removeForward;
 window.loadLinks = loadLinks;
+window.showQR = showQR;
 
 resetForm();
 if(token){

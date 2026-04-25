@@ -481,6 +481,14 @@ func buildInboundFromReq(req model.AddInboundRequest) (model.Inbound, error) {
 		in.Stream = map[string]any{
 			"network":  "hysteria",
 			"security": "tls",
+			"tlsSettings": map[string]any{
+				"serverName": emptyDefault(in.SNI, "www.bing.com"),
+				"alpn":       []string{"h3"},
+				"certificates": []map[string]any{{
+					"certificateFile": "/etc/sui-hy2/www.bing.com.crt",
+					"keyFile":         "/etc/sui-hy2/www.bing.com.key",
+				}},
+			},
 			"hysteriaSettings": map[string]any{
 				"version":        2,
 				"auth":           in.Password,
@@ -541,6 +549,113 @@ func buildInboundFromReq(req model.AddInboundRequest) (model.Inbound, error) {
 			in.Method = "aes-128-gcm"
 		}
 		in.Settings = map[string]any{"method": in.Method, "password": in.Password, "network": "tcp,udp"}
+		if in.Network == "" {
+			in.Network = "tcp"
+		}
+		in.Stream = map[string]any{"network": in.Network, "security": in.Security}
+	case "socks":
+		in.Protocol = "socks"
+		authMode := strings.TrimSpace(req.Auth)
+		if authMode == "" {
+			authMode = "noauth"
+		}
+		settings := map[string]any{"auth": authMode, "udp": true}
+		if authMode == "password" {
+			u := strings.TrimSpace(req.AccountUser)
+			p := req.AccountPass
+			if u == "" || p == "" {
+				return model.Inbound{}, fmt.Errorf("socks password auth requires accountUser/accountPass")
+			}
+			settings["accounts"] = []map[string]any{{"user": u, "pass": p}}
+		}
+		in.Settings = settings
+		in.Stream = map[string]any{"network": "tcp", "security": "none"}
+	case "http":
+		in.Protocol = "http"
+		authMode := strings.TrimSpace(req.Auth)
+		if authMode == "" {
+			authMode = "noauth"
+		}
+		settings := map[string]any{}
+		if authMode == "password" {
+			u := strings.TrimSpace(req.AccountUser)
+			p := req.AccountPass
+			if u == "" || p == "" {
+				return model.Inbound{}, fmt.Errorf("http password auth requires accountUser/accountPass")
+			}
+			settings["accounts"] = []map[string]any{{"user": u, "pass": p}}
+		}
+		in.Settings = settings
+		in.Stream = map[string]any{"network": "tcp", "security": "none"}
+	case "dokodemo", "dokodemo-door":
+		in.Protocol = "dokodemo-door"
+		addr := strings.TrimSpace(req.TargetAddress)
+		if addr == "" {
+			addr = "1.1.1.1"
+		}
+		port := req.TargetPort
+		if port <= 0 {
+			port = 53
+		}
+		in.Settings = map[string]any{
+			"address":        addr,
+			"port":           port,
+			"network":        "tcp,udp",
+			"followRedirect": false,
+		}
+		in.Stream = map[string]any{"network": "tcp", "security": "none"}
+	case "wireguard":
+		in.Protocol = "wireguard"
+		mtu := req.WireguardMTU
+		if mtu <= 0 {
+			mtu = 1420
+		}
+		sk := strings.TrimSpace(req.WireguardSecretKey)
+		if sk == "" {
+			sk = randomToken(16)
+		}
+		peerAllowed := strings.TrimSpace(req.WireguardAddress)
+		if peerAllowed == "" {
+			peerAllowed = "10.0.0.2/32"
+		}
+		if !strings.Contains(peerAllowed, "/") {
+			peerAllowed += "/32"
+		}
+		peer := map[string]any{
+			"publicKey":  randomToken(16),
+			"allowedIPs": []string{peerAllowed},
+			"keepAlive":  0,
+		}
+		in.Settings = map[string]any{
+			"mtu":       mtu,
+			"secretKey": sk,
+			"peers":     []map[string]any{peer},
+			"noKernelTun": false,
+		}
+		in.Stream = map[string]any{"network": "tcp", "security": "none"}
+	case "tun":
+		in.Protocol = "tun"
+		name := strings.TrimSpace(req.TunName)
+		if name == "" {
+			name = "xray0"
+		}
+		mtu := req.TunMTU
+		if mtu <= 0 {
+			mtu = 1500
+		}
+		stack := strings.TrimSpace(req.TunStack)
+		if stack == "" {
+			stack = "system"
+		}
+		in.Settings = map[string]any{
+			"name":        name,
+			"mtu":         mtu,
+			"stack":       stack,
+			"autoRoute":   req.TunAutoRoute,
+			"strictRoute": req.TunStrictRoute,
+			"userLevel":   0,
+		}
+		in.Stream = map[string]any{"network": "tcp", "security": "none"}
 	default:
 		return model.Inbound{}, fmt.Errorf("unsupported protocol: %s", proto)
 	}
@@ -1176,6 +1291,25 @@ func (a *App) handlePanelChangePassword(w http.ResponseWriter, r *http.Request) 
 	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "msg": "password updated"})
 }
 
+func inferPanelBaseURL(r *http.Request) string {
+	scheme := strings.TrimSpace(r.Header.Get("X-Forwarded-Proto"))
+	if scheme == "" {
+		if r.TLS != nil {
+			scheme = "https"
+		} else {
+			scheme = "http"
+		}
+	}
+	host := strings.TrimSpace(r.Header.Get("X-Forwarded-Host"))
+	if host == "" {
+		host = strings.TrimSpace(r.Host)
+	}
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	return fmt.Sprintf("%s://%s", scheme, host)
+}
+
 func (a *App) handlePanelConnectSub(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -1185,9 +1319,101 @@ func (a *App) handlePanelConnectSub(w http.ResponseWriter, r *http.Request) {
 		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	var req map[string]any
-	_ = json.NewDecoder(r.Body).Decode(&req)
-	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": map[string]any{"connected": true, "input": req}})
+	var req struct {
+		SubURL      string `json:"subUrl"`
+		SubUsername string `json:"subUsername"`
+		SubPassword string `json:"subPassword"`
+		SourceName  string `json:"sourceName"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		a.writeErr(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	req.SubURL = strings.TrimSpace(req.SubURL)
+	req.SubUsername = strings.TrimSpace(req.SubUsername)
+	req.SourceName = strings.TrimSpace(req.SourceName)
+	if req.SourceName == "" {
+		req.SourceName = "sui-go"
+	}
+	if req.SubURL == "" || req.SubUsername == "" || req.SubPassword == "" {
+		a.writeErr(w, http.StatusBadRequest, "subUrl / subUsername / subPassword 必填")
+		return
+	}
+
+	p, err := a.store.GetPanelSetting()
+	if err != nil {
+		a.writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	panelToken := strings.TrimSpace(p.APIToken)
+	if panelToken == "" {
+		p2, err := a.store.RotateAPIToken(randomToken(24))
+		if err != nil {
+			a.writeErr(w, http.StatusInternalServerError, "生成 panel token 失败: "+err.Error())
+			return
+		}
+		panelToken = strings.TrimSpace(p2.APIToken)
+	}
+
+	base := strings.TrimRight(req.SubURL, "/")
+	client := &http.Client{Timeout: 12 * time.Second}
+
+	loginBody, _ := json.Marshal(map[string]string{"username": req.SubUsername, "password": req.SubPassword})
+	loginReq, _ := http.NewRequest(http.MethodPost, base+"/api/auth/login", strings.NewReader(string(loginBody)))
+	loginReq.Header.Set("content-type", "application/json")
+	loginResp, err := client.Do(loginReq)
+	if err != nil {
+		a.writeErr(w, http.StatusBadGateway, "连接 sui-sub 失败: "+err.Error())
+		return
+	}
+	defer loginResp.Body.Close()
+	if loginResp.StatusCode < 200 || loginResp.StatusCode >= 300 {
+		a.writeErr(w, http.StatusBadRequest, fmt.Sprintf("sui-sub 登录失败 HTTP %d", loginResp.StatusCode))
+		return
+	}
+	cookies := loginResp.Cookies()
+	if len(cookies) == 0 {
+		a.writeErr(w, http.StatusBadRequest, "sui-sub 登录未返回会话 cookie")
+		return
+	}
+	cookieHeader := make([]string, 0, len(cookies))
+	for _, c := range cookies {
+		cookieHeader = append(cookieHeader, c.Name+"="+c.Value)
+	}
+
+	panelBase := inferPanelBaseURL(r)
+	sourceBody, _ := json.Marshal(map[string]string{
+		"name":        req.SourceName,
+		"panel_url":   panelBase,
+		"panel_token": panelToken,
+	})
+	sourceReq, _ := http.NewRequest(http.MethodPost, base+"/api/sources", strings.NewReader(string(sourceBody)))
+	sourceReq.Header.Set("content-type", "application/json")
+	sourceReq.Header.Set("cookie", strings.Join(cookieHeader, "; "))
+	sourceResp, err := client.Do(sourceReq)
+	if err != nil {
+		a.writeErr(w, http.StatusBadGateway, "写入 sui-sub 失败: "+err.Error())
+		return
+	}
+	defer sourceResp.Body.Close()
+	var sourceReply map[string]any
+	_ = json.NewDecoder(sourceResp.Body).Decode(&sourceReply)
+	if sourceResp.StatusCode < 200 || sourceResp.StatusCode >= 300 || sourceReply["ok"] != true {
+		msg := fmt.Sprintf("sui-sub 对接失败 HTTP %d", sourceResp.StatusCode)
+		if em, ok := sourceReply["error"].(string); ok && strings.TrimSpace(em) != "" {
+			msg = em
+		}
+		a.writeErr(w, http.StatusBadRequest, msg)
+		return
+	}
+	a.writeJSON(w, http.StatusOK, map[string]any{
+		"success": true,
+		"msg":     "已写入到 sui-sub",
+		"obj": map[string]any{
+			"panelUrl":  panelBase,
+			"sourceName": req.SourceName,
+		},
+	})
 }
 
 func (a *App) handleSystemStatus(w http.ResponseWriter, r *http.Request) {

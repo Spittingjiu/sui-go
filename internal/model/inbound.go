@@ -47,4 +47,18 @@ type AddInboundRequest struct {
 	PrivateKey     string `json:"privateKey"`
 	HY2HopPorts    string `json:"hy2HopPorts"`
 	HY2HopInterval string `json:"hy2HopInterval"`
+	TargetAddress      string `json:"targetAddress"`
+	TargetPort         int    `json:"targetPort"`
+	Auth               string `json:"auth"`
+	AccountUser        string `json:"accountUser"`
+	AccountPass        string `json:"accountPass"`
+	WireguardSecretKey string `json:"wireguardSecretKey"`
+	WireguardAddress   string `json:"wireguardAddress"`
+	WireguardMTU       int    `json:"wireguardMtu"`
+	WireguardReserved  string `json:"wireguardReserved"`
+	TunName            string `json:"tunName"`
+	TunMTU             int    `json:"tunMtu"`
+	TunStack           string `json:"tunStack"`
+	TunAutoRoute       bool   `json:"tunAutoRoute"`
+	TunStrictRoute     bool   `json:"tunStrictRoute"`
 }
