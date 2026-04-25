@@ -502,24 +502,14 @@ func buildInboundFromReq(req model.AddInboundRequest) (model.Inbound, error) {
 			hs["udphop"] = map[string]any{"ports": hopPorts, "interval": hopInterval}
 		}
 	case "vless":
-		if in.Network == "" {
-			in.Network = "tcp"
-		}
+		in.Network = normalizeInboundNetwork(in.Network)
 		if in.Security == "" {
 			in.Security = "none"
 		}
 		in.Settings = map[string]any{"clients": []map[string]any{{"id": in.UUID, "email": in.Email, "flow": in.Flow}}, "decryption": "none"}
-		in.Stream = map[string]any{"network": in.Network, "security": in.Security}
-		if in.Network == "ws" {
-			in.Stream["wsSettings"] = map[string]any{"path": emptyDefault(in.Path, "/"), "headers": map[string]any{"Host": emptyDefault(in.Host, in.SNI)}}
-		}
-		if in.Network == "xhttp" {
-			in.Stream["xhttpSettings"] = map[string]any{"path": emptyDefault(in.Path, "/"), "host": emptyDefault(in.Host, in.SNI), "mode": "auto"}
-		}
-		if in.Security == "tls" {
-			in.Stream["tlsSettings"] = map[string]any{"serverName": emptyDefault(in.SNI, in.Host)}
-		}
+		in.Stream = buildCommonStreamSettings(in.Network, in.Security, in.SNI, in.Host, in.Path)
 		if in.Security == "reality" {
+			in.Stream["security"] = "reality"
 			in.Stream["realitySettings"] = map[string]any{
 				"show":        false,
 				"dest":        emptyDefault(in.RealityDest, "www.cloudflare.com:443"),
@@ -529,30 +519,30 @@ func buildInboundFromReq(req model.AddInboundRequest) (model.Inbound, error) {
 			}
 		}
 	case "vmess":
-		if in.Network == "" {
-			in.Network = "tcp"
+		in.Network = normalizeInboundNetwork(in.Network)
+		if in.Security == "" {
+			in.Security = "none"
 		}
 		in.Settings = map[string]any{"clients": []map[string]any{{"id": in.UUID, "alterId": 0, "email": in.Email}}}
-		in.Stream = map[string]any{"network": in.Network, "security": in.Security}
+		in.Stream = buildCommonStreamSettings(in.Network, in.Security, in.SNI, in.Host, in.Path)
 	case "trojan":
-		if in.Network == "" {
-			in.Network = "tcp"
-		}
+		in.Network = normalizeInboundNetwork(in.Network)
 		if in.Security == "" {
 			in.Security = "tls"
 		}
 		in.Settings = map[string]any{"clients": []map[string]any{{"password": in.Password, "email": in.Email}}}
-		in.Stream = map[string]any{"network": in.Network, "security": in.Security}
+		in.Stream = buildCommonStreamSettings(in.Network, in.Security, in.SNI, in.Host, in.Path)
 	case "shadowsocks", "ss":
 		in.Protocol = "shadowsocks"
 		if in.Method == "" {
 			in.Method = "aes-128-gcm"
 		}
 		in.Settings = map[string]any{"method": in.Method, "password": in.Password, "network": "tcp,udp"}
-		if in.Network == "" {
-			in.Network = "tcp"
+		in.Network = normalizeInboundNetwork(in.Network)
+		if in.Security == "" {
+			in.Security = "none"
 		}
-		in.Stream = map[string]any{"network": in.Network, "security": in.Security}
+		in.Stream = buildCommonStreamSettings(in.Network, in.Security, in.SNI, in.Host, in.Path)
 	case "socks":
 		in.Protocol = "socks"
 		authMode := strings.TrimSpace(req.Auth)
@@ -611,8 +601,11 @@ func buildInboundFromReq(req model.AddInboundRequest) (model.Inbound, error) {
 			mtu = 1420
 		}
 		sk := strings.TrimSpace(req.WireguardSecretKey)
+		pk := ""
 		if sk == "" {
-			sk = randomToken(16)
+			sk, pk = generateWireguardKeypair()
+		} else {
+			_, pk = generateWireguardKeypair()
 		}
 		peerAllowed := strings.TrimSpace(req.WireguardAddress)
 		if peerAllowed == "" {
@@ -622,14 +615,14 @@ func buildInboundFromReq(req model.AddInboundRequest) (model.Inbound, error) {
 			peerAllowed += "/32"
 		}
 		peer := map[string]any{
-			"publicKey":  randomToken(16),
+			"publicKey":  pk,
 			"allowedIPs": []string{peerAllowed},
 			"keepAlive":  0,
 		}
 		in.Settings = map[string]any{
-			"mtu":       mtu,
-			"secretKey": sk,
-			"peers":     []map[string]any{peer},
+			"mtu":         mtu,
+			"secretKey":   sk,
+			"peers":       []map[string]any{peer},
 			"noKernelTun": false,
 		}
 		in.Stream = map[string]any{"network": "tcp", "security": "none"}
@@ -859,6 +852,43 @@ func buildLinks(in model.Inbound, r *http.Request) []string {
 	}
 }
 
+func normalizeInboundNetwork(raw string) string {
+	n := strings.TrimSpace(strings.ToLower(raw))
+	switch n {
+	case "", "raw":
+		return "tcp"
+	case "tcp", "kcp", "ws", "grpc", "httpupgrade", "xhttp", "hysteria":
+		return n
+	default:
+		return "tcp"
+	}
+}
+
+func buildCommonStreamSettings(network, security, sni, host, path string) map[string]any {
+	network = normalizeInboundNetwork(network)
+	sec := strings.TrimSpace(strings.ToLower(security))
+	if sec == "" {
+		sec = "none"
+	}
+	stream := map[string]any{"network": network, "security": sec}
+	safePath := emptyDefault(path, "/")
+	safeHost := emptyDefault(host, sni)
+	switch network {
+	case "ws":
+		stream["wsSettings"] = map[string]any{"path": safePath, "headers": map[string]any{"Host": safeHost}}
+	case "xhttp":
+		stream["xhttpSettings"] = map[string]any{"path": safePath, "host": safeHost, "mode": "auto"}
+	case "httpupgrade":
+		stream["httpupgradeSettings"] = map[string]any{"path": safePath, "host": safeHost}
+	case "grpc":
+		stream["grpcSettings"] = map[string]any{"serviceName": strings.TrimPrefix(safePath, "/")}
+	}
+	if sec == "tls" {
+		stream["tlsSettings"] = map[string]any{"serverName": emptyDefault(sni, host)}
+	}
+	return stream
+}
+
 func normalizeHopPorts(raw string) string {
 	s := strings.TrimSpace(raw)
 	s = strings.ReplaceAll(s, "，", ",")
@@ -898,6 +928,29 @@ func randomToken(bytes int) string {
 		return fmt.Sprintf("tok-%d", time.Now().UnixNano())
 	}
 	return hex.EncodeToString(buf)
+}
+
+func generateWireguardKeypair() (privateKey, publicKey string) {
+	out, err := exec.Command("bash", "-lc", "xray wg 2>/dev/null").Output()
+	if err == nil {
+		lines := strings.Split(string(out), "\n")
+		for _, ln := range lines {
+			s := strings.TrimSpace(ln)
+			if strings.HasPrefix(s, "PrivateKey:") {
+				privateKey = strings.TrimSpace(strings.TrimPrefix(s, "PrivateKey:"))
+			}
+			if strings.HasPrefix(s, "Password (PublicKey):") {
+				publicKey = strings.TrimSpace(strings.TrimPrefix(s, "Password (PublicKey):"))
+			}
+		}
+	}
+	if privateKey == "" {
+		privateKey = base64.StdEncoding.EncodeToString([]byte(randomToken(24)))
+	}
+	if publicKey == "" {
+		publicKey = base64.StdEncoding.EncodeToString([]byte(randomToken(24)))
+	}
+	return privateKey, publicKey
 }
 
 func emptyDefault(v, d string) string {
