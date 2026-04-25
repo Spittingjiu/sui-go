@@ -734,6 +734,9 @@ func (a *App) normalizeAddInboundRequest(req model.AddInboundRequest) (model.Add
 				}
 			}
 		}
+		if strings.TrimSpace(req.PrivateKey) == "" || strings.TrimSpace(req.PublicKey) == "" {
+			return req, fmt.Errorf("reality key generation failed: xray x25519 unavailable or parse failed")
+		}
 		if strings.TrimSpace(req.ShortID) == "" {
 			req.ShortID = strings.ReplaceAll(uuid.NewString(), "-", "")[:8]
 		}

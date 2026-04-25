@@ -195,6 +195,8 @@
             <input id="realityDest" class="w-xl" placeholder="reality dest host:port" />
             <input id="shortId" class="w-md" placeholder="reality shortId" />
             <input id="publicKey" class="w-xl" placeholder="reality publicKey" />
+            <input id="privateKey" class="w-xl" placeholder="reality privateKey" />
+            <button id="genReality" class="ghost">生成 Reality 参数</button>
           </div>
 
           <div id="f-secret" class="row">
@@ -393,6 +395,33 @@ async function doLogout(){
   location.href='/login.html';
 }
 
+async function ensureRealityFields(){
+  const isReality = $('proto').value==='vless' && $('sec').value==='reality';
+  if(!isReality) return;
+  const need = !($('publicKey').value||'').trim() || !($('privateKey').value||'').trim();
+  if(!need) return;
+  const j = await api('/api/system/xray/reality-gen');
+  const o = j.obj||{};
+  $('publicKey').value = o.publicKey || $('publicKey').value;
+  $('privateKey').value = o.privateKey || $('privateKey').value;
+  $('shortId').value = $('shortId').value || o.shortId || '';
+  $('realityDest').value = $('realityDest').value || 'www.cloudflare.com:443';
+  $('sni').value = $('sni').value || 'www.cloudflare.com';
+}
+
+async function doGenReality(){
+  try{
+    const j = await api('/api/system/xray/reality-gen');
+    const o = j.obj||{};
+    $('publicKey').value = o.publicKey || '';
+    $('privateKey').value = o.privateKey || '';
+    $('shortId').value = o.shortId || $('shortId').value;
+    setStatus('Reality 参数已生成');
+  }catch(e){
+    setStatus('Reality 参数生成失败: '+e.message, false);
+  }
+}
+
 function getPayload(){
   const proto=$('proto').value;
   if(proto==='forward'){
@@ -419,6 +448,7 @@ function getPayload(){
     realityDest:$('realityDest').value,
     shortId:$('shortId').value,
     publicKey:$('publicKey').value,
+    privateKey:$('privateKey').value,
     sni:$('sni').value,
     hy2HopPorts:$('hopPorts').value,
     hy2HopInterval:$('hopInt').value,
@@ -455,6 +485,7 @@ function fillForm(x){
   $('realityDest').value = x.realityDest || '';
   $('shortId').value = x.shortId || '';
   $('publicKey').value = x.publicKey || '';
+  $('privateKey').value = x.privateKey || '';
   $('sni').value = x.sni || '';
   $('fTargetHost').value = x.targetHost || '';
   $('fTargetPort').value = x.targetPort || '';
@@ -563,6 +594,7 @@ function resetForm(){
   $('realityDest').value='';
   $('shortId').value='';
   $('publicKey').value='';
+  $('privateKey').value='';
   $('sni').value='www.bing.com';
   $('fTargetHost').value='';
   $('fTargetPort').value='';
@@ -599,6 +631,7 @@ async function saveInbound(){
   if(!id){ $('addOut').textContent='请先选择一条记录再保存'; return; }
   const proto=$('proto').value;
   try{
+    await ensureRealityFields();
     const url = proto==='forward' ? `/api/forwards/${id}` : `/api/inbounds/${id}/full`;
     const j=await api(url,{method:'PUT',body:JSON.stringify(getPayload())});
     $('addOut').textContent=JSON.stringify(j,null,2);
@@ -748,6 +781,7 @@ $('reset').onclick=resetForm;
 $('cfgShow').onclick=showCfg;
 $('cfgExport').onclick=exportCfg;
 $('cfgApply').onclick=applyCfg;
+$('genReality').onclick=doGenReality;
 $('updatePanel').onclick=updatePanel;
 $('connectSub').onclick=connectSub;
 $('quickHy2').onclick=()=>applyPreset('hy2');
