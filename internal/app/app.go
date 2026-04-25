@@ -2012,19 +2012,47 @@ func (a *App) handleXrayApply(w http.ResponseWriter, r *http.Request) {
 	a.reloadMu.Lock()
 	defer a.reloadMu.Unlock()
 
-	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "bash", "-lc", a.cfg.XrayReloadCmd)
-	out, err := cmd.CombinedOutput()
-	if ctx.Err() == context.DeadlineExceeded {
-		a.writeJSON(w, http.StatusOK, map[string]any{"success": false, "path": a.cfg.XrayConfigOut, "applied": false, "error": "reload timeout", "output": string(out)})
-		return
+	backupPath := a.cfg.XrayConfigOut + ".last-good"
+	if len(existing) > 0 {
+		_ = os.WriteFile(backupPath, existing, 0o644)
 	}
+
+	reload := func() (string, error, bool) {
+		ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, "bash", "-lc", a.cfg.XrayReloadCmd)
+		out, err := cmd.CombinedOutput()
+		if ctx.Err() == context.DeadlineExceeded {
+			return string(out), fmt.Errorf("reload timeout"), true
+		}
+		return string(out), err, false
+	}
+
+	out, err, timeout := reload()
 	if err != nil {
-		a.writeJSON(w, http.StatusOK, map[string]any{"success": false, "path": a.cfg.XrayConfigOut, "applied": false, "error": err.Error(), "output": string(out)})
+		rolled := false
+		rollbackErr := ""
+		if len(existing) > 0 {
+			if werr := os.WriteFile(a.cfg.XrayConfigOut, existing, 0o644); werr == nil {
+				_, rerr, _ := reload()
+				if rerr == nil {
+					rolled = true
+				} else {
+					rollbackErr = rerr.Error()
+				}
+			} else {
+				rollbackErr = werr.Error()
+			}
+		}
+		if timeout {
+			a.writeJSON(w, http.StatusOK, map[string]any{"success": false, "path": a.cfg.XrayConfigOut, "applied": false, "rolledBack": rolled, "rollbackError": rollbackErr, "error": err.Error(), "output": out})
+			return
+		}
+		a.writeJSON(w, http.StatusOK, map[string]any{"success": false, "path": a.cfg.XrayConfigOut, "applied": false, "rolledBack": rolled, "rollbackError": rollbackErr, "error": err.Error(), "output": out})
 		return
 	}
-	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "path": a.cfg.XrayConfigOut, "applied": true, "output": string(out)})
+	_ = os.WriteFile(backupPath, b, 0o644)
+	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "path": a.cfg.XrayConfigOut, "applied": true, "output": out, "backup": backupPath})
 }
 
 func (a *App) handleNextPort(w http.ResponseWriter, r *http.Request) {
