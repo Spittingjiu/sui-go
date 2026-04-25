@@ -1,7 +1,7 @@
 # sui-go
 
-`sui-go` 是一个面向 **x-ui 使用习惯** 的 Go 版面板后端（含内置 Web UI），目标是：
-- 操作体验对齐 x-ui（登录、入站管理、链接/二维码、系统操作）
+`sui-go` 是一个 Go 版代理面板后端（含内置 Web UI），目标是：
+- 提供完整可用的管理体验（登录、入站管理、链接/二维码、系统操作）
 - 架构升级为 Go + SQLite，降低运行复杂度
 - 与 `sui-sub` 打通，形成“面板管理 + 订阅分发”闭环
 
@@ -9,7 +9,7 @@
 
 ---
 
-## 1. 对标 x-ui：能力总览
+## 1. 能力总览
 
 ## 已对齐的核心能力
 - 认证与会话：`/auth/login`、`/auth/refresh`、`/auth/logout`、`/auth/me`
@@ -72,7 +72,7 @@
 ## 2.4 典型使用场景
 - 面板侧完成节点录入后，一键同步到订阅平台
 - 将多个节点源统一汇聚在 sui-sub 侧做订阅出口
-- 作为 x-ui 迁移阶段的过渡桥接（管理与订阅分离）
+- 作为迁移阶段的过渡桥接（管理与订阅分离）
 
 ---
 
@@ -155,7 +155,7 @@
 - `POST /api/system/update-panel`
 - `POST /api/system/chain/test`
 - `POST /api/system/restart-xray`
-- `POST /api/system/restart-xui`
+- `POST /api/system/restart-`（兼容接口，建议使用 restart-xray）
 - `POST /api/system/optimize/bbr`
 - `POST /api/system/optimize/dns`
 - `POST /api/system/optimize/sysctl`
@@ -187,7 +187,7 @@
 - `scripts/perf-smoke-concurrency.sh`
 - `scripts/fault-inject-smoke.sh`
 - `scripts/write-batch-benchmark.sh`
-- `docs/xui-parity-protocol-checklist-2026-04-25.md`
+- `docs/protocol-matrix-latest.json`
 
 ---
 
@@ -198,11 +198,11 @@
 
 ---
 
-## 8. 路线图（继续对标 x-ui）
+## 8. 路线图
 
-- 完善协议高级参数覆盖率（按 x-ui 参数矩阵持续补齐）
+- 完善协议高级参数覆盖率（按参数矩阵持续补齐）
 - 强化导入导出与迁移工具链
-- 前端交互继续贴近 x-ui 常用路径
+- 前端交互继续优化高频操作路径
 - 扩展 sub 协同能力（源管理、同步审计、重试策略）
 
 ---
