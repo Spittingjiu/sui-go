@@ -1,0 +1,26 @@
+{
+  "suite": "scale-baseline",
+  "report": [
+    {
+      "size": 100,
+      "full_p50_ms": 59.09,
+      "full_p95_ms": 61.36,
+      "lite_p50_ms": 12.96,
+      "lite_p95_ms": 17.0
+    },
+    {
+      "size": 500,
+      "full_p50_ms": 54.26,
+      "full_p95_ms": 61.41,
+      "lite_p50_ms": 20.26,
+      "lite_p95_ms": 22.42
+    },
+    {
+      "size": 1000,
+      "full_p50_ms": 57.53,
+      "full_p95_ms": 61.83,
+      "lite_p50_ms": 31.21,
+      "lite_p95_ms": 33.2
+    }
+  ]
+}

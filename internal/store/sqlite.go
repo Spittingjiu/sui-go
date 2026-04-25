@@ -29,6 +29,9 @@ func NewSQLite(dbPath string) (*SQLiteStore, error) {
 	}
 	_ = db.Exec("ALTER TABLE inbound_dbs ADD COLUMN sniffing_enabled numeric DEFAULT 1").Error
 	_ = db.Exec("ALTER TABLE inbound_dbs ADD COLUMN sniffing_override text DEFAULT 'http,tls,quic'").Error
+	_ = db.Exec("CREATE INDEX IF NOT EXISTS idx_inbound_dbs_port ON inbound_dbs(port)").Error
+	_ = db.Exec("CREATE INDEX IF NOT EXISTS idx_inbound_dbs_protocol ON inbound_dbs(protocol)").Error
+	_ = db.Exec("CREATE INDEX IF NOT EXISTS idx_inbound_dbs_enable ON inbound_dbs(enable)").Error
 	return &SQLiteStore{db: db}, nil
 }
 

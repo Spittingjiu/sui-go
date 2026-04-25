@@ -97,6 +97,7 @@ func (a *App) routes() {
 	a.mux.HandleFunc("/api/xray/config", a.handleXrayConfig)
 	a.mux.HandleFunc("/api/xray/export", a.handleXrayExport)
 	a.mux.HandleFunc("/api/xray/apply", a.handleXrayApply)
+	a.mux.HandleFunc("/api/xray/apply-events", a.handleXrayApplyEvents)
 
 	a.mux.HandleFunc("/api/forwards", a.handleForwards)
 	a.mux.HandleFunc("/api/forwards/", a.handleForwardsSub)
@@ -1973,6 +1974,74 @@ func (a *App) handleXrayExport(w http.ResponseWriter, r *http.Request) {
 	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "path": a.cfg.XrayConfigOut, "bytes": len(b)})
 }
 
+func (a *App) appendApplyEvent(ev map[string]any) {
+	if ev == nil {
+		return
+	}
+	if err := os.MkdirAll("data", 0o755); err != nil {
+		return
+	}
+	line, err := json.Marshal(ev)
+	if err != nil {
+		return
+	}
+	f, err := os.OpenFile("data/apply-events.jsonl", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	_, _ = f.Write(line)
+	_, _ = f.Write([]byte("\n"))
+}
+
+func (a *App) handleXrayApplyEvents(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !a.checkAuth(r) {
+		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	limit, _ := strconv.Atoi(strings.TrimSpace(r.URL.Query().Get("limit")))
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 500 {
+		limit = 500
+	}
+	b, err := os.ReadFile("data/apply-events.jsonl")
+	if err != nil {
+		if os.IsNotExist(err) {
+			a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": []any{}, "limit": limit})
+			return
+		}
+		a.writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
+	if len(lines) == 1 && strings.TrimSpace(lines[0]) == "" {
+		a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": []any{}, "limit": limit})
+		return
+	}
+	start := 0
+	if len(lines) > limit {
+		start = len(lines) - limit
+	}
+	out := make([]map[string]any, 0, len(lines)-start)
+	for _, ln := range lines[start:] {
+		ln = strings.TrimSpace(ln)
+		if ln == "" {
+			continue
+		}
+		var obj map[string]any
+		if err := json.Unmarshal([]byte(ln), &obj); err == nil {
+			out = append(out, obj)
+		}
+	}
+	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": out, "limit": limit})
+}
+
 func (a *App) handleXrayApply(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -1996,8 +2065,10 @@ func (a *App) handleXrayApply(w http.ResponseWriter, r *http.Request) {
 		a.writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	now := time.Now().Unix()
 	existing, _ := os.ReadFile(a.cfg.XrayConfigOut)
 	if bytes.Equal(existing, b) {
+		a.appendApplyEvent(map[string]any{"ts": now, "success": true, "applied": false, "skipped": true, "reason": "unchanged"})
 		a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "path": a.cfg.XrayConfigOut, "applied": false, "skipped": true, "msg": "config unchanged, skip reload"})
 		return
 	}
@@ -2006,6 +2077,7 @@ func (a *App) handleXrayApply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if strings.TrimSpace(a.cfg.XrayReloadCmd) == "" {
+		a.appendApplyEvent(map[string]any{"ts": now, "success": true, "applied": false, "skipped": true, "reason": "reload_not_configured"})
 		a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "path": a.cfg.XrayConfigOut, "applied": false, "msg": "reload command not configured"})
 		return
 	}
@@ -2044,14 +2116,12 @@ func (a *App) handleXrayApply(w http.ResponseWriter, r *http.Request) {
 				rollbackErr = werr.Error()
 			}
 		}
-		if timeout {
-			a.writeJSON(w, http.StatusOK, map[string]any{"success": false, "path": a.cfg.XrayConfigOut, "applied": false, "rolledBack": rolled, "rollbackError": rollbackErr, "error": err.Error(), "output": out})
-			return
-		}
+		a.appendApplyEvent(map[string]any{"ts": now, "success": false, "applied": false, "rolledBack": rolled, "rollbackError": rollbackErr, "error": err.Error(), "timeout": timeout})
 		a.writeJSON(w, http.StatusOK, map[string]any{"success": false, "path": a.cfg.XrayConfigOut, "applied": false, "rolledBack": rolled, "rollbackError": rollbackErr, "error": err.Error(), "output": out})
 		return
 	}
 	_ = os.WriteFile(backupPath, b, 0o644)
+	a.appendApplyEvent(map[string]any{"ts": now, "success": true, "applied": true, "backup": backupPath})
 	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "path": a.cfg.XrayConfigOut, "applied": true, "output": out, "backup": backupPath})
 }
 
