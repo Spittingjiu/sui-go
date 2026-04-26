@@ -2866,8 +2866,6 @@ func (a *App) handleAddRealityQuick(w http.ResponseWriter, r *http.Request) {
 		req.Port = np
 	}
 	u := uuid.NewString()
-	pk := strings.ReplaceAll(uuid.NewString(), "-", "")
-	prv := strings.ReplaceAll(uuid.NewString(), "-", "")
 	sid := strings.ReplaceAll(uuid.NewString(), "-", "")[:8]
 	inReq, err := a.normalizeAddInboundRequest(model.AddInboundRequest{
 		Remark:      emptyDefault(req.Remark, "reality-quick"),
@@ -2881,8 +2879,7 @@ func (a *App) handleAddRealityQuick(w http.ResponseWriter, r *http.Request) {
 		Path:        "/",
 		RealityDest: emptyDefault(req.Dest, "www.cloudflare.com:443"),
 		ShortID:     sid,
-		PublicKey:   pk,
-		PrivateKey:  prv,
+		// 不手填 PublicKey/PrivateKey，交给 normalizeAddInboundRequest 内部走 xray x25519 正确生成
 	})
 	if err != nil {
 		a.writeErr(w, http.StatusBadRequest, err.Error())
