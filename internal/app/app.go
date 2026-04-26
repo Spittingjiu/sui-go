@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -1128,6 +1129,10 @@ func (a *App) extractAuth(r *http.Request) (token, username string, ok bool) {
 		tok = strings.TrimSpace(parts[1])
 	}
 	if tok == "" {
+		// 兼容 sui-sub / panel-proxy：支持 x-panel-token 透传
+		tok = strings.TrimSpace(r.Header.Get("x-panel-token"))
+	}
+	if tok == "" {
 		if c, err := r.Cookie("sui_go_token"); err == nil {
 			tok = strings.TrimSpace(c.Value)
 		}
@@ -1135,11 +1140,26 @@ func (a *App) extractAuth(r *http.Request) (token, username string, ok bool) {
 	if tok == "" {
 		return "", "", false
 	}
+
+	// 先走会话 token（网页登录态 / Bearer）
 	user, valid, err := a.store.ValidateToken(tok, time.Now())
-	if err != nil || !valid {
-		return "", "", false
+	if err == nil && valid {
+		return tok, user, true
 	}
-	return tok, user, true
+
+	// 再兼容 panel API token（用于 sui-sub 对接 x-panel-token）
+	if ps, perr := a.store.GetPanelSetting(); perr == nil {
+		pt := strings.TrimSpace(ps.APIToken)
+		if pt != "" && subtle.ConstantTimeCompare([]byte(tok), []byte(pt)) == 1 {
+			u := strings.TrimSpace(ps.Username)
+			if u == "" {
+				u = "panel"
+			}
+			return tok, u, true
+		}
+	}
+
+	return "", "", false
 }
 
 func (a *App) checkAuth(r *http.Request) bool {
