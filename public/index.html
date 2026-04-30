@@ -192,7 +192,6 @@
                 <div class="form-field span-2"><label for="shortId">Short ID</label><input id="shortId" placeholder="自动" /></div>
                 <div class="form-field span-3"><label for="publicKey">Public Key</label><input id="publicKey" placeholder="自动生成" /></div>
                 <div class="form-field span-3"><label for="privateKey">Private Key</label><input id="privateKey" placeholder="自动生成" /></div>
-                <button id="genReality" class="ghost span-1">生成</button>
               </div>
               <div id="f-secret" class="field-grid"><div class="form-field span-3"><label for="pwd">密码</label><input id="pwd" placeholder="HY2 / Trojan / SS 密码" value="abc123" /></div></div>
               <div id="f-ss" class="field-grid hidden"><div class="form-field span-3"><label for="method">加密方式</label><input id="method" placeholder="aes-128-gcm" value="aes-128-gcm" /></div></div>
@@ -225,6 +224,7 @@ let activeRows = [];
 let editorMode = 'create';
 const realityTargetPool = ['www.icloud.com', 'www.lovelive-anime.jp', 'addons.mozilla.org', 'www.microsoft.com', 'www.apple.com', 'www.bing.com', 'www.amazon.com'];
 let realityTargetIndex = 0;
+let realityGenerating = null;
 
 function applyRealityTarget(host){
   host = (host || realityTargetPool[0]).trim();
@@ -355,6 +355,9 @@ function updateFieldVisibility(){
   $('f-ss').classList.toggle('hidden', !isSS);
   $('f-secret').classList.toggle('hidden', !(isHy2 || isTrojan || isSS));
   $('f-reality').classList.toggle('hidden', !(isVless && sec==='reality'));
+  if(isVless && sec==='reality') {
+    ensureRealityFields().catch(e=>setStatus('Reality 参数生成失败: '+e.message, false));
+  }
   $('f-forward').classList.toggle('hidden', !isForward);
   $('f-auth').classList.toggle('hidden', !isHttpLike);
   $('f-dokodemo').classList.toggle('hidden', !isDoko);
@@ -375,25 +378,16 @@ async function ensureRealityFields(){
   if(!isReality) return;
   const need = !($('publicKey').value||'').trim() || !($('privateKey').value||'').trim();
   if(!need) return;
-  const j = await api('/api/system/xray/reality-gen');
-  const o = j.obj||{};
-  $('publicKey').value = o.publicKey || $('publicKey').value;
-  $('privateKey').value = o.privateKey || $('privateKey').value;
-  $('shortId').value = $('shortId').value || o.shortId || '';
-  if(!$('realityDest').value && !$('sni').value) applyRealityTarget(realityTargetPool[0]);
-}
-
-async function doGenReality(){
-  try{
+  if(realityGenerating) return realityGenerating;
+  realityGenerating = (async()=>{
     const j = await api('/api/system/xray/reality-gen');
     const o = j.obj||{};
-    $('publicKey').value = o.publicKey || '';
-    $('privateKey').value = o.privateKey || '';
-    $('shortId').value = o.shortId || $('shortId').value;
-    setStatus('Reality 参数已生成');
-  }catch(e){
-    setStatus('Reality 参数生成失败: '+e.message, false);
-  }
+    $('publicKey').value = o.publicKey || $('publicKey').value;
+    $('privateKey').value = o.privateKey || $('privateKey').value;
+    $('shortId').value = $('shortId').value || o.shortId || '';
+    if(!$('realityDest').value && !$('sni').value) applyRealityTarget(realityTargetPool[0]);
+  })();
+  try{ await realityGenerating; } finally { realityGenerating = null; }
 }
 
 function getPayload(){
@@ -925,7 +919,6 @@ $('xrayUpdateSelected').onclick=updateSelectedXray;
 $('cfgShow').onclick=showCfg;
 $('cfgExport').onclick=exportCfg;
 $('cfgApply').onclick=applyCfg;
-$('genReality').onclick=doGenReality;
 $('cycleRealityDest').onclick=cycleRealityTarget;
 $('genUuid').onclick=()=>ensureUuid(true);
 $('updatePanel').onclick=updatePanel;
