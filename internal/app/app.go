@@ -2386,6 +2386,36 @@ func (a *App) handleXrayConfig(w http.ResponseWriter, r *http.Request) {
 	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": cfg})
 }
 
+func ensureHY2CertificateFiles() error {
+	certDir := "/etc/sui-hy2"
+	certFile := filepath.Join(certDir, "www.bing.com.crt")
+	keyFile := filepath.Join(certDir, "www.bing.com.key")
+	if fileNonEmpty(certFile) && fileNonEmpty(keyFile) {
+		return nil
+	}
+	if err := os.MkdirAll(certDir, 0o755); err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", keyFile, "-out", certFile, "-days", "3650", "-subj", "/CN=www.bing.com")
+	out, err := cmd.CombinedOutput()
+	if ctx.Err() == context.DeadlineExceeded {
+		return fmt.Errorf("generate hy2 certificate timeout")
+	}
+	if err != nil {
+		return fmt.Errorf("generate hy2 certificate failed: %v: %s", err, strings.TrimSpace(string(out)))
+	}
+	_ = os.Chmod(keyFile, 0o600)
+	_ = os.Chmod(certFile, 0o644)
+	return nil
+}
+
+func fileNonEmpty(path string) bool {
+	st, err := os.Stat(path)
+	return err == nil && st.Size() > 0
+}
+
 func (a *App) handleXrayExport(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -2397,6 +2427,10 @@ func (a *App) handleXrayExport(w http.ResponseWriter, r *http.Request) {
 	}
 	cfg, err := a.buildXrayConfig()
 	if err != nil {
+		a.writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := ensureHY2CertificateFiles(); err != nil {
 		a.writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -2561,6 +2595,10 @@ func (a *App) handleXrayApply(w http.ResponseWriter, r *http.Request) {
 	}
 	cfg, err := a.buildXrayConfig()
 	if err != nil {
+		a.writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := ensureHY2CertificateFiles(); err != nil {
 		a.writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
