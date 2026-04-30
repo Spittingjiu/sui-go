@@ -579,9 +579,6 @@ async function quickCreate(kind){
     switchSection('sec-list');
     setStatus(label+' 已创建');
     $('linkOut').textContent=label+' 已创建：'+(obj.remark||'')+'  端口 '+(obj.port||$('port').value)+'\n可直接点该行“复制”或“二维码”。';
-    if(obj.id) {
-      try { await copyFirstLink(Number(obj.id), {silent:true, prefix: label+' 已创建，节点链接：'}); } catch(_e) {}
-    }
   }catch(e){
     openEditorModal('create');
     $('addOut').textContent='极速创建失败：'+e.message+'\n已保留自动生成的参数，可修改后点“创建节点”。';
