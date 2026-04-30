@@ -211,6 +211,25 @@ panel_addr(){
   echo "http://127.0.0.1:${port}"
 }
 
+public_panel_url(){
+  local addr port ip default_url input
+  addr=$(get_env ADDR ':18811')
+  port="${addr##*:}"; [[ "$port" =~ ^[0-9]+$ ]] || port=18811
+  if [[ -n "${SUI_PUBLIC_URL:-}" ]]; then
+    default_url="${SUI_PUBLIC_URL%/}"
+  else
+    ip=$(curl -4fsS --max-time 4 https://api.ipify.org 2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}' || true)
+    ip="${ip%%[[:space:]]*}"
+    [[ -n "$ip" ]] || ip="127.0.0.1"
+    default_url="http://${ip}:${port}"
+  fi
+  read -r -p "请输入当前 SUI-Go 公网地址（默认: ${default_url}）: " input
+  input="${input:-$default_url}"
+  input="${input%/}"
+  [[ -n "$input" ]] || return 1
+  echo "$input"
+}
+
 api_login_token(){
   local base user pass
   base=$(panel_addr)
@@ -365,13 +384,14 @@ install_xray(){
 }
 
 connect_sub(){
-  local sub_url sub_user sub_pass source_name token base
+  local sub_url sub_user sub_pass source_name token base panel_url
   base=$(panel_addr)
   token=$(api_login_token || true)
   if [[ -z "$token" ]]; then
     echo "无法自动登录面板，请先确认 /etc/default/sui-go 里的 PANEL_USER/PANEL_PASS 是否正确。"
     return 1
   fi
+  panel_url=$(public_panel_url) || { echo "SUI-Go 公网地址不能为空"; return 1; }
   read -r -p "请输入 sui-sub 地址（如: https://sub.example.com）: " sub_url
   sub_url="${sub_url%/}"
   [[ -n "$sub_url" ]] || { echo "sui-sub 地址不能为空"; return 1; }
@@ -382,7 +402,7 @@ connect_sub(){
   read -r -p "写入到 sub 的源名称（默认: sui-go）: " source_name
   source_name="${source_name:-sui-go}"
   curl -fsS -X POST "$base/api/panel/connect-sub" -H "Authorization: Bearer $token" -H 'content-type: application/json' \
-    --data "$(json_obj subUrl "$sub_url" subUsername "$sub_user" subPassword "$sub_pass" sourceName "$source_name")" \
+    --data "$(json_obj subUrl "$sub_url" subUsername "$sub_user" subPassword "$sub_pass" sourceName "$source_name" panelUrl "$panel_url")" \
     | print_json_response
 }
 

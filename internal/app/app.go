@@ -2843,6 +2843,7 @@ func (a *App) handlePanelConnectSub(w http.ResponseWriter, r *http.Request) {
 		SubUsername string `json:"subUsername"`
 		SubPassword string `json:"subPassword"`
 		SourceName  string `json:"sourceName"`
+		PanelURL    string `json:"panelUrl"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		a.writeErr(w, http.StatusBadRequest, "invalid json")
@@ -2851,6 +2852,7 @@ func (a *App) handlePanelConnectSub(w http.ResponseWriter, r *http.Request) {
 	req.SubURL = strings.TrimSpace(req.SubURL)
 	req.SubUsername = strings.TrimSpace(req.SubUsername)
 	req.SourceName = strings.TrimSpace(req.SourceName)
+	req.PanelURL = strings.TrimSpace(req.PanelURL)
 	if req.SourceName == "" {
 		req.SourceName = "sui-go"
 	}
@@ -2876,50 +2878,39 @@ func (a *App) handlePanelConnectSub(w http.ResponseWriter, r *http.Request) {
 
 	base := strings.TrimRight(req.SubURL, "/")
 	client := &http.Client{Timeout: 12 * time.Second}
-
-	loginBody, _ := json.Marshal(map[string]string{"username": req.SubUsername, "password": req.SubPassword})
-	loginReq, _ := http.NewRequest(http.MethodPost, base+"/api/auth/login", strings.NewReader(string(loginBody)))
-	loginReq.Header.Set("content-type", "application/json")
-	loginResp, err := client.Do(loginReq)
-	if err != nil {
-		a.writeErr(w, http.StatusBadGateway, "连接 sui-sub 失败: "+err.Error())
-		return
-	}
-	defer loginResp.Body.Close()
-	if loginResp.StatusCode < 200 || loginResp.StatusCode >= 300 {
-		a.writeErr(w, http.StatusBadRequest, fmt.Sprintf("sui-sub 登录失败 HTTP %d", loginResp.StatusCode))
-		return
-	}
-	cookies := loginResp.Cookies()
-	if len(cookies) == 0 {
-		a.writeErr(w, http.StatusBadRequest, "sui-sub 登录未返回会话 cookie")
-		return
-	}
-	cookieHeader := make([]string, 0, len(cookies))
-	for _, c := range cookies {
-		cookieHeader = append(cookieHeader, c.Name+"="+c.Value)
-	}
-
 	panelBase := inferPanelBaseURL(r)
-	sourceBody, _ := json.Marshal(map[string]string{
+	if req.PanelURL != "" {
+		if u, err := url.Parse(req.PanelURL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			a.writeErr(w, http.StatusBadRequest, "panelUrl 必须是 http(s) 地址")
+			return
+		}
+		panelBase = strings.TrimRight(req.PanelURL, "/")
+	}
+
+	// Preferred path: sui-sub bridge endpoint is intentionally exempt from
+	// browser-session CSRF rules and performs its own username/password check.
+	// This keeps CLI/API driven one-click onboarding stable even if the web UI
+	// session cookie policy changes.
+	bridgeBody, _ := json.Marshal(map[string]string{
+		"username":    req.SubUsername,
+		"password":    req.SubPassword,
 		"name":        req.SourceName,
 		"panel_url":   panelBase,
 		"panel_token": panelToken,
 	})
-	sourceReq, _ := http.NewRequest(http.MethodPost, base+"/api/sources", strings.NewReader(string(sourceBody)))
-	sourceReq.Header.Set("content-type", "application/json")
-	sourceReq.Header.Set("cookie", strings.Join(cookieHeader, "; "))
-	sourceResp, err := client.Do(sourceReq)
+	bridgeReq, _ := http.NewRequest(http.MethodPost, base+"/api/bridge/push-source", bytes.NewReader(bridgeBody))
+	bridgeReq.Header.Set("content-type", "application/json")
+	bridgeResp, err := client.Do(bridgeReq)
 	if err != nil {
-		a.writeErr(w, http.StatusBadGateway, "写入 sui-sub 失败: "+err.Error())
+		a.writeErr(w, http.StatusBadGateway, "连接 sui-sub 失败: "+err.Error())
 		return
 	}
-	defer sourceResp.Body.Close()
-	var sourceReply map[string]any
-	_ = json.NewDecoder(sourceResp.Body).Decode(&sourceReply)
-	if sourceResp.StatusCode < 200 || sourceResp.StatusCode >= 300 || sourceReply["ok"] != true {
-		msg := fmt.Sprintf("sui-sub 对接失败 HTTP %d", sourceResp.StatusCode)
-		if em, ok := sourceReply["error"].(string); ok && strings.TrimSpace(em) != "" {
+	defer bridgeResp.Body.Close()
+	var bridgeReply map[string]any
+	_ = json.NewDecoder(bridgeResp.Body).Decode(&bridgeReply)
+	if bridgeResp.StatusCode < 200 || bridgeResp.StatusCode >= 300 || bridgeReply["ok"] != true {
+		msg := fmt.Sprintf("sui-sub 对接失败 HTTP %d", bridgeResp.StatusCode)
+		if em, ok := bridgeReply["error"].(string); ok && strings.TrimSpace(em) != "" {
 			msg = em
 		}
 		a.writeErr(w, http.StatusBadRequest, msg)
