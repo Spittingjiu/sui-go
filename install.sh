@@ -16,7 +16,7 @@ need_root() {
 
 ensure_deps() {
   local missing=()
-  for cmd in git go curl; do
+  for cmd in git go curl unzip; do
     if ! command -v "$cmd" >/dev/null 2>&1; then
       case "$cmd" in
         go) missing+=(golang-go) ;;
@@ -53,9 +53,9 @@ ADDR=:18811
 DB_FILE=/opt/sui-go/data/sui-go.db
 PANEL_USER=admin
 PANEL_PASS=admin123
-XRAY_CONFIG_OUT=/usr/local/x-ui/bin/config.json
-# 示例：XRAY_RELOAD_CMD=systemctl restart x-ui
-XRAY_RELOAD_CMD=
+XRAY_CONFIG_OUT=/usr/local/etc/xray/config.json
+# 示例：XRAY_RELOAD_CMD=systemctl restart xray
+XRAY_RELOAD_CMD=systemctl restart xray
 EOF
   fi
 }
@@ -293,8 +293,75 @@ net.core.default_qdisc=fq
 net.ipv4.tcp_congestion_control=bbr
 EOT
   modprobe tcp_bbr || true
-  sysctl --system >/dev/null
+  sysctl -e -p /etc/sysctl.d/99-sui-go-bbr.conf >/dev/null
   echo "已启用 BBR + fq"
+}
+
+ensure_xray_service(){
+  mkdir -p /usr/local/etc/xray /usr/local/share/xray
+  if [[ ! -f /usr/local/etc/xray/config.json ]]; then
+    cat >/usr/local/etc/xray/config.json <<'EOT'
+{"log":{"loglevel":"warning"},"inbounds":[],"outbounds":[{"protocol":"freedom","tag":"direct"}]}
+EOT
+  fi
+  cat >/etc/systemd/system/xray.service <<'EOT'
+[Unit]
+Description=Xray Service
+After=network.target nss-lookup.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/bin/xray run -config /usr/local/etc/xray/config.json
+Restart=on-failure
+RestartSec=3
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target
+EOT
+  systemctl daemon-reload
+  systemctl enable xray >/dev/null 2>&1 || true
+}
+
+install_xray(){
+  local base token info stable dev ch ver
+  if ! command -v unzip >/dev/null 2>&1; then
+    if command -v apt-get >/dev/null 2>&1; then
+      apt-get update -y
+      DEBIAN_FRONTEND=noninteractive apt-get install -y unzip ca-certificates
+    elif command -v yum >/dev/null 2>&1; then
+      yum install -y unzip ca-certificates
+    elif command -v dnf >/dev/null 2>&1; then
+      dnf install -y unzip ca-certificates
+    else
+      echo "无法自动安装 unzip，请先安装 unzip"
+      return 1
+    fi
+  fi
+  base=$(panel_addr)
+  token=$(api_login_token || true)
+  [[ -n "$token" ]] || { echo "无法自动登录面板"; return 1; }
+  ensure_xray_service
+  info=$(curl -fsS "$base/api/system/xray/version-current" -H "Authorization: Bearer $token")
+  stable=$(echo "$info" | json_get_string obj.stableLatest)
+  dev=$(echo "$info" | json_get_string obj.devLatest)
+  echo "1) 安装/更新稳定版 (${stable:-未知})"
+  echo "2) 安装/更新开发版 (${dev:-未知})"
+  echo "0) 返回"
+  read -r -p "选择: " ch
+  case "$ch" in
+    1) ver="$stable" ;;
+    2) ver="$dev" ;;
+    0) return 0 ;;
+    *) echo "无效选择"; return 1 ;;
+  esac
+  [[ -n "$ver" && "$ver" != "未知" ]] || { echo "目标版本为空"; return 1; }
+  curl -fsS -X POST "$base/api/system/xray/switch" -H "Authorization: Bearer $token" -H 'content-type: application/json'     --data "$(json_obj version "$ver")" | print_json_response
+  ensure_xray_service
+  systemctl restart xray || true
+  xray version 2>/dev/null | head -n1 || true
 }
 
 connect_sub(){
@@ -400,7 +467,8 @@ main_menu(){
     echo "5) 一键对接 sub"
     echo "6) 更新 sui-go 面板"
     echo "7) Xray 更新（稳定版/开发版）"
-    echo "8) 一键卸载 sui-go"
+    echo "8) 安装/修复 Xray"
+    echo "9) 一键卸载 sui-go"
     echo "0) 退出"
     read -r -p "选择: " c
     case "$c" in
@@ -411,7 +479,8 @@ main_menu(){
       5) connect_sub; pause ;;
       6) update_panel; pause ;;
       7) xray_update_menu; pause ;;
-      8) uninstall_sui_go ;;
+      8) install_xray; pause ;;
+      9) uninstall_sui_go ;;
       0) exit 0 ;;
       *) echo "无效选择"; pause ;;
     esac
