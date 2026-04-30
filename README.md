@@ -1,120 +1,231 @@
 # sui-go
 
-`sui-go` 是一个 Go 版代理面板后端（含内置 Web UI），目标是：
-- 提供完整可用的管理体验（登录、入站管理、链接/二维码、系统操作）
-- 架构升级为 Go + SQLite，降低运行复杂度
-- 与 `sui-sub` 打通，形成“面板管理 + 订阅分发”闭环
+<p align="center">
+  <b>一块安静、利落、能真正上线的 Xray 管理面板。</b><br />
+  Go 后端 · SQLite 存储 · Apple 风 Web UI · sui-sub 桥接 · VPS 命令行菜单
+</p>
 
-> 当前仓库定位：可直接上线使用的持续迭代版（不是 demo）。
-
----
-
-## 1. 能力总览
-
-## 已对齐的核心能力
-- 认证与会话：`/auth/login`、`/auth/refresh`、`/auth/logout`、`/auth/me`
-- 入站全生命周期：新增/查询/更新/删除/启停/批量启停
-- 入站详情扩展：`/api/inbounds/:id/full`（兼容 full 字段场景）
-- 链接能力：`/api/inbounds/:id/links`、`/api/inbounds/:id/qr`
-- 系统运维入口：xray 重启/切换/配置导出/状态检查
-- Xray 配置链路：`/api/xray/config`、`/api/xray/export`、`/api/xray/apply`
-
-## 已实现的增强（在对齐基础上额外补强）
-- 配置缓存：`/api/xray/config` 命中缓存后更快
-- apply 串行化 + 超时保护：避免并发 reload 打架
-- apply 无变化跳过：配置不变时直接 `skipped=true`
-- apply 失败回滚：reload 失败自动回退 last-good 配置
-- apply 事件日志：`/api/xray/apply-events`
-- apply 聚合统计：`/api/xray/apply-stats?sinceMin=60`
-- 入站轻量列表：`/api/inbounds?full=0&limit=&offset=`（UI 默认已切换）
-- 批量写入：`/api/inbounds/add-batch`（单次最多 200 条）
-
-## 协议支持（当前）
-- vless
-- vmess
-- trojan
-- shadowsocks
-- hysteria(v2)
-
-补充：
-- vless 支持 reality/xhttp 常用字段
-- hy2 支持 hop 参数（`hy2HopPorts`、`hy2HopInterval`）
+<p align="center">
+  <img alt="Go" src="https://img.shields.io/badge/Go-1.22+-00ADD8?style=for-the-badge&logo=go&logoColor=white" />
+  <img alt="SQLite" src="https://img.shields.io/badge/SQLite-local-003B57?style=for-the-badge&logo=sqlite&logoColor=white" />
+  <img alt="Xray" src="https://img.shields.io/badge/Xray-ready-111111?style=for-the-badge" />
+  <img alt="License" src="https://img.shields.io/badge/License-MIT-black?style=for-the-badge" />
+</p>
 
 ---
 
-## 2. Sub 能力（重点）
+## 这是什么
 
-`sui-go` 已支持直接对接 `sui-sub`，把当前面板节点源写入订阅系统。
+`sui-go` 是一个轻量、克制、偏工程实用主义的代理面板。
 
-## 2.1 对接接口
-- `POST /api/panel/connect-sub`（需 Bearer Token）
+它不是为了把页面做成控制中心，也不是为了塞满按钮证明自己很强。它的目标很简单：
 
-请求字段：
-- `subUrl`：sui-sub 地址（例如 `https://sub.example.com`）
-- `subUsername`：sui-sub 登录用户名
-- `subPassword`：sui-sub 登录密码
-- `sourceName`：写入到 sui-sub 的源名称（可选，默认 `sui-go`）
+- 打开就能看到节点。
+- 一键就能创建常用节点。
+- 复制、二维码、编辑、删除都在同一个工作流里。
+- 面板设置、Xray 更新、sui-sub 对接这些低频能力，收进该待的地方。
+- 后端用 Go + SQLite，部署干净，迁移简单，跑在小 VPS 上也不累。
 
-返回：
-- 成功时返回“已写入到 sui-sub”及目标地址信息
-- 失败时返回明确的上游错误（登录失败、会话 cookie 缺失、写入失败等）
-
-## 2.2 对接流程（服务端行为）
-1. sui-go 校验输入参数
-2. 登录 sui-sub，获取会话 cookie
-3. 用会话调用 sui-sub 源写入接口
-4. 返回结果给面板前端（成功/失败可观测）
-
-## 2.3 前端入口
-- 首页已内置 “Connect Sub” 区域（URL/用户名/密码/源名称）
-- 点击后直接走 `connect-sub` 接口，不需要手工拼请求
-
-## 2.4 典型使用场景
-- 面板侧完成节点录入后，一键同步到订阅平台
-- 将多个节点源统一汇聚在 sui-sub 侧做订阅出口
-- 作为迁移阶段的过渡桥接（管理与订阅分离）
+一句话：**把代理面板从“功能堆叠”拉回“真实使用”。**
 
 ---
 
-## 3. 快速安装
+## ✨ 亮点
 
-一键安装：
-- `curl -fsSL https://raw.githubusercontent.com/Spittingjiu/sui-go/main/install.sh | bash`
+### 少入口，高效率
 
-安装后常用命令：
-- `systemctl status sui-go --no-pager`
-- `systemctl restart sui-go`
-- `journalctl -u sui-go -n 100 --no-pager`
+默认首页就是节点列表。没有多余首页，没有仪表盘噪音，没有让人迷路的菜单。
 
-环境文件：
-- `/etc/default/sui-go`
+当前主导航只有：
+
+- **节点**：创建、复制、扫码、编辑、删除。
+- **概览 SUB**：系统概览与 sui-sub 对接。
+- **面板设置**：账号、安全、Xray 更新、配置导出与 reload。
+
+### 一键创建常用节点
+
+内置极速创建：
+
+- 一键 HY2
+- 一键 Reality
+- 一键 Trojan
+
+Reality 默认目标使用 `www.icloud.com:443`，并提供来自 `sui` 最新 GitHub 版本的目标域名池：
+
+- `www.icloud.com`
+- `www.lovelive-anime.jp`
+- `addons.mozilla.org`
+- `www.microsoft.com`
+- `www.apple.com`
+- `www.bing.com`
+- `www.amazon.com`
+
+### Xray 更新更清楚
+
+Xray 更新不再只给一坨技术输出。
+
+面板会展示：
+
+- 当前版本
+- 稳定版最新
+- 开发版最新
+- 当前选择通道是否需要更新
+
+并支持：
+
+- 检测稳定版 / 开发版
+- 更新到所选版本
+- 过滤 prerelease 的稳定版口径
+
+### sui-sub 一键桥接
+
+`sui-go` 可以把当前面板节点源写入 `sui-sub`，形成：
+
+> 面板录入节点 → sui-sub 聚合规则 → 客户端订阅分发
+
+不用手工拼请求，也不用在两个系统之间来回复制。
+
+### VPS 里输入 `sui` 就能管理
+
+安装后提供命令行菜单：
+
+```text
+sui
+```
+
+菜单包含：
+
+1. 修改面板账号密码
+2. 显示当前用户信息
+3. 修改面板端口
+4. 启用 BBR + fq
+5. 一键对接 sub
+6. 更新 sui-go 面板
+7. Xray 更新（稳定版 / 开发版）
+8. 一键卸载 sui-go
 
 ---
 
-## 4. 启动配置
+## 快速安装
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Spittingjiu/sui-go/main/install.sh | bash
+```
 
 默认监听：
-- `:18811`
 
-环境变量：
-- `ADDR`：监听地址（默认 `:18811`）
-- `DB_FILE`：SQLite 文件（默认 `data/sui-go.db`）
-- `PANEL_USER`：面板用户名（默认 `admin`）
-- `PANEL_PASS`：面板密码（默认 `admin123`）
-- `XRAY_CONFIG_OUT`：xray 配置输出路径（默认 `data/xray-config.json`）
-- `XRAY_RELOAD_CMD`：xray reload 命令（为空则 apply 仅写文件不 reload）
+```text
+http://服务器IP:18811
+```
+
+默认账号：
+
+```text
+用户名：admin
+密码：admin123
+```
+
+> 上线后建议第一时间在「面板设置」里修改用户名和密码。
 
 ---
 
-## 5. API 速查（当前可用）
+## 常用命令
 
-## 认证
+```bash
+# 打开 VPS 命令行菜单
+sui
+
+# 查看服务状态
+systemctl status sui-go --no-pager
+
+# 重启面板
+systemctl restart sui-go
+
+# 查看日志
+journalctl -u sui-go -n 100 --no-pager
+```
+
+---
+
+## 环境配置
+
+配置文件：
+
+```text
+/etc/default/sui-go
+```
+
+常用环境变量：
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `ADDR` | `:18811` | 面板监听地址 |
+| `DB_FILE` | `/opt/sui-go/data/sui-go.db` | SQLite 数据库路径 |
+| `PANEL_USER` | `admin` | 初始面板用户名 |
+| `PANEL_PASS` | `admin123` | 初始面板密码 |
+| `XRAY_CONFIG_OUT` | `/usr/local/etc/xray/config.json` | Xray 配置导出路径 |
+| `XRAY_RELOAD_CMD` | `systemctl restart xray` | 导出配置后的 reload 命令 |
+
+---
+
+## 支持能力
+
+### 节点协议
+
+当前支持：
+
+- VLESS
+- VMess
+- Trojan
+- Shadowsocks
+- Hysteria2 / HY2
+- SOCKS
+- HTTP
+- Dokodemo-door
+- WireGuard
+- TUN
+- Port Forward
+
+其中：
+
+- VLESS 支持 Reality、TLS、WS、XHTTP、HTTPUpgrade、gRPC 等常用组合。
+- HY2 支持端口跳跃参数。
+- UUID、密码、端口、Reality 参数等高频字段可自动生成。
+
+### 面板能力
+
+- 登录 / 退出 / 会话校验
+- 节点新增、编辑、删除、启停
+- 轻量节点列表，首屏更快
+- 节点链接与二维码
+- 面板用户名 / 密码修改
+- Xray 配置导出与 reload
+- Xray 稳定版 / 开发版更新
+- BBR + fq 优化入口
+- sui-sub 对接
+
+### 稳定性设计
+
+- Go 单二进制部署
+- SQLite 本地存储
+- 配置导出支持 last-good 回滚
+- apply 操作串行化，避免并发 reload 打架
+- apply 事件日志与统计接口
+- 本地运行数据默认不纳入 Git
+
+---
+
+## API 速查
+
+### 认证
+
 - `POST /auth/login`
 - `POST /auth/refresh`
 - `POST /auth/logout`
 - `GET /auth/me`
 
-## 入站
+### Inbounds
+
 - `GET /api/inbounds`
 - `POST /api/inbounds/add`
 - `POST /api/inbounds/add-batch`
@@ -130,83 +241,116 @@
 - `GET /api/inbounds/:id/links`
 - `GET /api/inbounds/:id/qr`
 
-## Xray
+### Port Forward
+
+- `GET /api/forwards`
+- `POST /api/forwards`
+- `PUT /api/forwards/:id`
+- `DELETE /api/forwards/:id`
+- `POST /api/forwards/:id/toggle`
+
+### Xray 配置
+
 - `GET /api/xray/config`
 - `POST /api/xray/export`
 - `POST /api/xray/apply`
 - `GET /api/xray/apply-events`
 - `GET /api/xray/apply-stats`
 
-## 转发
-- `GET/POST /api/forwards`
-- `PUT/DELETE /api/forwards/:id`
-- `POST /api/forwards/:id/toggle`
+### 面板设置与 sui-sub
 
-## 面板设置与 Sub
-- `GET/POST /api/panel/settings`
+- `GET /api/panel/settings`
+- `POST /api/panel/settings`
 - `GET /api/panel/token`
 - `POST /api/panel/token/rotate`
+- `POST /api/panel/change-username`
 - `POST /api/panel/change-password`
 - `POST /api/panel/connect-sub`
 
-## 系统
+### 系统
+
 - `GET /api/system/status`
 - `POST /api/system/restart-panel`
 - `POST /api/system/update-panel`
 - `POST /api/system/chain/test`
 - `POST /api/system/restart-xray`
-- `POST /api/system/restart-`（兼容接口，建议使用 restart-xray）
 - `POST /api/system/optimize/bbr`
 - `POST /api/system/optimize/dns`
 - `POST /api/system/optimize/sysctl`
 - `POST /api/system/optimize/all`
 - `GET /api/system/xray/version-current`
 - `GET /api/system/xray/reality-gen`
-- `GET/POST /api/system/xray/config`
+- `GET /api/system/xray/config`
+- `POST /api/system/xray/config`
 - `GET /api/system/xray/versions`
 - `POST /api/system/xray/switch`
 
-## 视图初始化
+### 视图初始化
+
 - `GET /api/view/bootstrap`
 
 ---
 
-## 6. 性能与稳定性（最近迭代）
+## 本地开发
 
-已落地：
-- 入站列表 lite 查询默认化（UI）
-- apply 事件日志 + 统计接口
-- apply 失败自动回滚
-- SQLite 索引（port/protocol/enable）
-- SQLite WAL + 连接池参数调优
-- 批量写入接口与基准脚本
+```bash
+git clone https://github.com/Spittingjiu/sui-go.git
+cd sui-go
 
-仓库内可参考：
-- `docs/perf-scale-report-2026-04-25.json`
-- `scripts/perf-smoke.sh`
-- `scripts/perf-smoke-concurrency.sh`
-- `scripts/fault-inject-smoke.sh`
-- `scripts/write-batch-benchmark.sh`
-- `docs/protocol-matrix-latest.json`
+go test ./...
+go build -o sui-go ./cmd/sui-go
 
----
+ADDR=:18811 ./sui-go
+```
 
-## 7. 部署文件
+打开：
 
-- `install.sh`：安装脚本
-- `sui-go.service`：systemd 服务模板
+```text
+http://127.0.0.1:18811
+```
 
 ---
 
-## 8. 路线图
+## 项目结构
 
-- 完善协议高级参数覆盖率（按参数矩阵持续补齐）
-- 强化导入导出与迁移工具链
-- 前端交互继续优化高频操作路径
-- 扩展 sub 协同能力（源管理、同步审计、重试策略）
+```text
+sui-go/
+├── cmd/sui-go/          # 程序入口
+├── internal/app/        # HTTP API 与业务逻辑
+├── internal/model/      # 数据模型
+├── internal/store/      # SQLite 存储层
+├── public/              # 内置 Web UI
+├── scripts/             # 测试与辅助脚本
+├── docs/                # 性能、协议矩阵等文档
+├── install.sh           # 一键安装脚本
+└── sui-go.service       # systemd 服务模板
+```
 
 ---
 
-## 9. License
+## 设计取向
+
+`sui-go` 的审美不是「赛博控制台」，而是「工具应该消失在任务背后」。
+
+所以它会尽量：
+
+- 少一点装饰，多一点路径清晰。
+- 少一点跳转，多一点就地完成。
+- 少一点吓人的错误，多一点能继续操作的提示。
+- 少一点“看起来很强”，多一点“真的好用”。
+
+---
+
+## 路线图
+
+- 继续补齐协议高级参数覆盖率
+- 强化导入 / 导出 / 迁移工具链
+- 完善 sui-sub 协同能力：源管理、同步审计、失败重试
+- 增加更完整的部署形态文档：直连、反代、HTTPS
+- 持续压缩高频操作路径，让面板更像工具，而不是迷宫
+
+---
+
+## License
 
 MIT
