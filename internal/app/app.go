@@ -109,6 +109,7 @@ func (a *App) routes() {
 	a.mux.HandleFunc("/api/panel/token", a.handlePanelToken)
 	a.mux.HandleFunc("/api/panel/token/rotate", a.handlePanelTokenRotate)
 	a.mux.HandleFunc("/api/panel/change-password", a.handlePanelChangePassword)
+	a.mux.HandleFunc("/api/panel/change-username", a.handlePanelChangeUsername)
 	a.mux.HandleFunc("/api/panel/connect-sub", a.handlePanelConnectSub)
 
 	a.mux.HandleFunc("/api/system/status", a.handleSystemStatus)
@@ -384,12 +385,22 @@ func (a *App) handleAddInboundsBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	prepared := make([]model.Inbound, 0, len(body.Items))
+	seenPorts := map[int]struct{}{}
 	for i, req := range body.Items {
 		norm, err := a.normalizeAddInboundRequest(req)
 		if err != nil {
 			a.writeErr(w, http.StatusBadRequest, fmt.Sprintf("item[%d]: %v", i, err))
 			return
 		}
+		if err := a.ensureInboundPortAvailable(norm.Port, 0); err != nil {
+			a.writeErr(w, http.StatusBadRequest, fmt.Sprintf("item[%d]: %v", i, err))
+			return
+		}
+		if _, ok := seenPorts[norm.Port]; ok {
+			a.writeErr(w, http.StatusBadRequest, fmt.Sprintf("item[%d]: port %d duplicated in batch", i, norm.Port))
+			return
+		}
+		seenPorts[norm.Port] = struct{}{}
 		in, err := buildInboundFromReq(norm)
 		if err != nil {
 			a.writeErr(w, http.StatusBadRequest, fmt.Sprintf("item[%d]: %v", i, err))
@@ -429,6 +440,10 @@ func (a *App) handleAddInbound(w http.ResponseWriter, r *http.Request) {
 
 	norm, err := a.normalizeAddInboundRequest(req)
 	if err != nil {
+		a.writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := a.ensureInboundPortAvailable(norm.Port, 0); err != nil {
 		a.writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -490,6 +505,10 @@ func (a *App) handleInboundSub(w http.ResponseWriter, r *http.Request) {
 			mergeXUIStyleIntoAddReq(&req, raw)
 			norm, err := a.normalizeAddInboundRequest(req)
 			if err != nil {
+				a.writeErr(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			if err := a.ensureInboundPortAvailable(norm.Port, id); err != nil {
 				a.writeErr(w, http.StatusBadRequest, err.Error())
 				return
 			}
@@ -621,6 +640,10 @@ func (a *App) handleInboundSub(w http.ResponseWriter, r *http.Request) {
 					a.writeErr(w, http.StatusBadRequest, err.Error())
 					return
 				}
+				if err := a.ensureInboundPortAvailable(norm.Port, id); err != nil {
+					a.writeErr(w, http.StatusBadRequest, err.Error())
+					return
+				}
 				in, err := buildInboundFromReq(norm)
 				if err != nil {
 					a.writeErr(w, http.StatusBadRequest, err.Error())
@@ -651,6 +674,14 @@ func (a *App) normalizeAddInboundRequest(req model.AddInboundRequest) (model.Add
 	if proto == "" {
 		return req, fmt.Errorf("protocol required")
 	}
+	req = normalizePanelInboundRequest(req)
+	proto = strings.ToLower(strings.TrimSpace(req.Protocol))
+	if !isAllowedPanelNetwork(req.Network) {
+		return req, fmt.Errorf("unsupported network: %s", req.Network)
+	}
+	if req.Security != "" && req.Security != "none" && req.Security != "tls" && req.Security != "reality" {
+		return req, fmt.Errorf("unsupported security: %s", req.Security)
+	}
 	if req.Port <= 0 {
 		np, err := a.store.NextInboundPort(20000)
 		if err != nil {
@@ -674,15 +705,6 @@ func (a *App) normalizeAddInboundRequest(req model.AddInboundRequest) (model.Add
 	}
 	if err := validateAddInboundRequest(req); err != nil {
 		return req, err
-	}
-	rows, err := a.store.ListInbounds()
-	if err != nil {
-		return req, err
-	}
-	for _, r := range rows {
-		if r.Port == req.Port {
-			return req, fmt.Errorf("port %d already exists", req.Port)
-		}
 	}
 	if strings.TrimSpace(req.Network) == "" {
 		switch proto {
@@ -742,16 +764,29 @@ func (a *App) normalizeAddInboundRequest(req model.AddInboundRequest) (model.Add
 			req.ShortID = strings.ReplaceAll(uuid.NewString(), "-", "")[:8]
 		}
 		if strings.TrimSpace(req.RealityDest) == "" {
-			req.RealityDest = "www.cloudflare.com:443"
+			req.RealityDest = "www.icloud.com:443"
 		}
 		if strings.TrimSpace(req.SNI) == "" {
-			req.SNI = "www.cloudflare.com"
+			req.SNI = "www.icloud.com"
 		}
 		if strings.TrimSpace(req.Host) == "" {
 			req.Host = req.SNI
 		}
 	}
 	return req, nil
+}
+
+func (a *App) ensureInboundPortAvailable(port int, exceptID int64) error {
+	rows, err := a.store.ListInbounds()
+	if err != nil {
+		return err
+	}
+	for _, r := range rows {
+		if r.Port == port && int64(r.ID) != exceptID {
+			return fmt.Errorf("port %d already exists", port)
+		}
+	}
+	return nil
 }
 
 func buildInboundFromReq(req model.AddInboundRequest) (model.Inbound, error) {
@@ -877,8 +912,8 @@ func buildInboundFromReq(req model.AddInboundRequest) (model.Inbound, error) {
 			in.Stream["security"] = "reality"
 			in.Stream["realitySettings"] = map[string]any{
 				"show":        false,
-				"dest":        emptyDefault(in.RealityDest, "www.cloudflare.com:443"),
-				"serverNames": []string{emptyDefault(in.SNI, "www.cloudflare.com")},
+				"dest":        emptyDefault(in.RealityDest, "www.icloud.com:443"),
+				"serverNames": []string{emptyDefault(in.SNI, "www.icloud.com")},
 				"privateKey":  in.PrivateKey,
 				"shortIds":    []string{in.ShortID},
 			}
@@ -1368,11 +1403,103 @@ func normalizeInboundNetwork(raw string) string {
 	switch n {
 	case "", "raw":
 		return "tcp"
-	case "tcp", "kcp", "ws", "grpc", "httpupgrade", "xhttp", "hysteria":
+	case "tcp", "ws", "grpc", "httpupgrade", "xhttp", "hysteria":
 		return n
 	default:
 		return "tcp"
 	}
+}
+
+func isAllowedPanelNetwork(network string) bool {
+	switch strings.TrimSpace(strings.ToLower(network)) {
+	case "", "tcp", "ws", "xhttp", "httpupgrade", "grpc", "hysteria":
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizePanelInboundRequest(req model.AddInboundRequest) model.AddInboundRequest {
+	proto := strings.ToLower(strings.TrimSpace(req.Protocol))
+	req.Protocol = proto
+	req.Network = strings.TrimSpace(strings.ToLower(req.Network))
+	req.Security = strings.TrimSpace(strings.ToLower(req.Security))
+	switch proto {
+	case "hysteria", "hysteria2":
+		req.Network = "hysteria"
+		if req.Security == "" || req.Security == "none" {
+			req.Security = "tls"
+		}
+		req.UUID, req.Method, req.Flow, req.Host, req.Path = "", "", "", "", ""
+		req.RealityDest, req.ShortID, req.PublicKey, req.PrivateKey = "", "", "", ""
+	case "vless":
+		if req.Network == "" {
+			req.Network = "tcp"
+		}
+		if req.Security == "" {
+			req.Security = "none"
+		}
+		req.Password, req.Method = "", ""
+		if req.Security != "reality" {
+			req.RealityDest, req.ShortID, req.PublicKey, req.PrivateKey = "", "", "", ""
+		}
+		if req.Security != "tls" && req.Security != "reality" {
+			req.SNI = ""
+		}
+	case "vmess":
+		if req.Network == "" {
+			req.Network = "tcp"
+		}
+		if req.Security == "" {
+			req.Security = "none"
+		}
+		req.Password, req.Method, req.Flow = "", "", ""
+		req.RealityDest, req.ShortID, req.PublicKey, req.PrivateKey = "", "", "", ""
+		if req.Security != "tls" {
+			req.SNI = ""
+		}
+	case "trojan":
+		if req.Network == "" {
+			req.Network = "tcp"
+		}
+		if req.Security == "" || req.Security == "none" {
+			req.Security = "tls"
+		}
+		req.UUID, req.Method, req.Flow = "", "", ""
+		req.RealityDest, req.ShortID, req.PublicKey, req.PrivateKey = "", "", "", ""
+	case "shadowsocks", "ss":
+		req.Protocol = "shadowsocks"
+		req.Network = "tcp"
+		req.Security = "none"
+		req.UUID, req.Flow, req.SNI, req.Host, req.Path = "", "", "", "", ""
+		req.RealityDest, req.ShortID, req.PublicKey, req.PrivateKey = "", "", "", ""
+	case "socks", "http":
+		req.Network = "tcp"
+		req.Security = "none"
+		req.UUID, req.Password, req.Method, req.Flow = "", "", "", ""
+		req.SNI, req.Host, req.Path = "", "", ""
+		req.RealityDest, req.ShortID, req.PublicKey, req.PrivateKey = "", "", "", ""
+	case "dokodemo", "dokodemo-door":
+		req.Protocol = "dokodemo-door"
+		req.Network = "tcp"
+		req.Security = "none"
+		req.UUID, req.Password, req.Method, req.Flow = "", "", "", ""
+		req.SNI, req.Host, req.Path = "", "", ""
+		req.RealityDest, req.ShortID, req.PublicKey, req.PrivateKey = "", "", "", ""
+	case "wireguard":
+		req.Network = "tcp"
+		req.Security = "none"
+		req.UUID, req.Password, req.Method, req.Flow = "", "", "", ""
+		req.SNI, req.Host, req.Path = "", "", ""
+		req.RealityDest, req.ShortID, req.PublicKey, req.PrivateKey = "", "", "", ""
+	case "tun":
+		req.Network = "tcp"
+		req.Security = "none"
+		req.UUID, req.Password, req.Method, req.Flow = "", "", "", ""
+		req.SNI, req.Host, req.Path = "", "", ""
+		req.RealityDest, req.ShortID, req.PublicKey, req.PrivateKey = "", "", "", ""
+	}
+	return req
 }
 
 func buildCommonStreamSettings(network, security, sni, host, path string) map[string]any {
@@ -2603,6 +2730,48 @@ func (a *App) handlePanelTokenRotate(w http.ResponseWriter, r *http.Request) {
 	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": map[string]any{"token": p.APIToken}})
 }
 
+func (a *App) handlePanelChangeUsername(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !a.checkAuth(r) {
+		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	_, user, ok := a.extractAuth(r)
+	if !ok {
+		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	var req struct {
+		Username string `json:"username"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		a.writeErr(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	newUsername := strings.TrimSpace(req.Username)
+	if len(newUsername) < 3 {
+		a.writeErr(w, http.StatusBadRequest, "username too short")
+		return
+	}
+	if strings.ContainsAny(newUsername, " \t\n\r") {
+		a.writeErr(w, http.StatusBadRequest, "username must not contain whitespace")
+		return
+	}
+	changed, err := a.store.ChangeUsername(user, newUsername)
+	if err != nil {
+		a.writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !changed {
+		a.writeErr(w, http.StatusBadRequest, "username already exists or current user not found")
+		return
+	}
+	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "msg": "username updated", "user": newUsername})
+}
+
 func (a *App) handlePanelChangePassword(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -2874,10 +3043,10 @@ func (a *App) handleAddRealityQuick(w http.ResponseWriter, r *http.Request) {
 		UUID:        u,
 		Network:     "xhttp",
 		Security:    "reality",
-		SNI:         emptyDefault(req.SNI, "www.cloudflare.com"),
-		Host:        emptyDefault(req.SNI, "www.cloudflare.com"),
+		SNI:         emptyDefault(req.SNI, "www.icloud.com"),
+		Host:        emptyDefault(req.SNI, "www.icloud.com"),
 		Path:        "/",
-		RealityDest: emptyDefault(req.Dest, "www.cloudflare.com:443"),
+		RealityDest: emptyDefault(req.Dest, "www.icloud.com:443"),
 		ShortID:     sid,
 		// 不手填 PublicKey/PrivateKey，交给 normalizeAddInboundRequest 内部走 xray x25519 正确生成
 	})
@@ -2887,6 +3056,10 @@ func (a *App) handleAddRealityQuick(w http.ResponseWriter, r *http.Request) {
 	}
 	in, err := buildInboundFromReq(inReq)
 	if err != nil {
+		a.writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := a.ensureInboundPortAvailable(in.Port, 0); err != nil {
 		a.writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -3055,6 +3228,119 @@ func (a *App) handleSystemOptimizeAll(w http.ResponseWriter, r *http.Request) {
 	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": map[string]any{"bbr": bbr, "dns": dns, "sysctl": sysctlObj}, "msg": "全部优化已应用"})
 }
 
+func parseXrayVersionTag(raw string) string {
+	fields := strings.Fields(strings.TrimSpace(raw))
+	for _, f := range fields {
+		f = strings.Trim(strings.TrimSpace(f), " ,;()[]")
+		if f == "" {
+			continue
+		}
+		if strings.HasPrefix(strings.ToLower(f), "v") {
+			f = f[1:]
+		}
+		parts := strings.Split(f, ".")
+		if len(parts) < 2 || len(parts) > 4 {
+			continue
+		}
+		ok := true
+		for _, p := range parts {
+			if p == "" {
+				ok = false
+				break
+			}
+			for _, r := range p {
+				if r < '0' || r > '9' {
+					ok = false
+					break
+				}
+			}
+		}
+		if ok {
+			return "v" + strings.Join(parts, ".")
+		}
+	}
+	return ""
+}
+
+func compareVersionTags(a, b string) int {
+	clean := func(v string) []int {
+		v = strings.TrimPrefix(strings.TrimSpace(strings.ToLower(v)), "v")
+		parts := strings.Split(v, ".")
+		out := make([]int, 4)
+		for i := 0; i < len(parts) && i < len(out); i++ {
+			out[i], _ = strconv.Atoi(parts[i])
+		}
+		return out
+	}
+	av, bv := clean(a), clean(b)
+	for i := range av {
+		if av[i] > bv[i] {
+			return 1
+		}
+		if av[i] < bv[i] {
+			return -1
+		}
+	}
+	return 0
+}
+
+type xrayReleaseInfo struct {
+	Stable string
+	Dev    string
+}
+
+func fetchXrayReleaseInfo() (xrayReleaseInfo, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/repos/XTLS/Xray-core/releases?per_page=50", nil)
+	if err != nil {
+		return xrayReleaseInfo{}, err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("User-Agent", "sui-go-panel")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return xrayReleaseInfo{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return xrayReleaseInfo{}, fmt.Errorf("github releases http %d", resp.StatusCode)
+	}
+	var arr []struct {
+		TagName    string `json:"tag_name"`
+		Name       string `json:"name"`
+		Draft      bool   `json:"draft"`
+		Prerelease bool   `json:"prerelease"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&arr); err != nil {
+		return xrayReleaseInfo{}, err
+	}
+	info := xrayReleaseInfo{}
+	for _, rel := range arr {
+		if rel.Draft {
+			continue
+		}
+		tag := strings.TrimSpace(rel.TagName)
+		if tag == "" {
+			tag = strings.TrimSpace(rel.Name)
+		}
+		tag = parseXrayVersionTag(tag)
+		if tag == "" {
+			continue
+		}
+		if info.Dev == "" || compareVersionTags(tag, info.Dev) > 0 {
+			info.Dev = tag
+		}
+		if !rel.Prerelease && (info.Stable == "" || compareVersionTags(tag, info.Stable) > 0) {
+			info.Stable = tag
+		}
+	}
+	if info.Stable == "" && info.Dev == "" {
+		return xrayReleaseInfo{}, fmt.Errorf("no release tag found")
+	}
+	return info, nil
+}
+
 func (a *App) handleSystemXrayVersionCurrent(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -3065,7 +3351,32 @@ func (a *App) handleSystemXrayVersionCurrent(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	out, _ := a.runBestEffort("xray version 2>/dev/null | head -n1")
-	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": map[string]any{"binary": strings.TrimSpace(out), "panel": "self-hosted"}})
+	binary := strings.TrimSpace(out)
+	currentTag := parseXrayVersionTag(binary)
+	rel, latestErr := fetchXrayReleaseInfo()
+	stableUpdateAvailable := false
+	devUpdateAvailable := false
+	if currentTag != "" && rel.Stable != "" {
+		stableUpdateAvailable = compareVersionTags(rel.Stable, currentTag) > 0
+	}
+	if currentTag != "" && rel.Dev != "" {
+		devUpdateAvailable = compareVersionTags(rel.Dev, currentTag) > 0
+	}
+	obj := map[string]any{
+		"binary":                binary,
+		"current":               currentTag,
+		"stableLatest":          rel.Stable,
+		"devLatest":             rel.Dev,
+		"latest":                rel.Stable,
+		"stableUpdateAvailable": stableUpdateAvailable,
+		"devUpdateAvailable":    devUpdateAvailable,
+		"updateAvailable":       stableUpdateAvailable,
+		"panel":                 "self-hosted",
+	}
+	if latestErr != nil {
+		obj["latestError"] = latestErr.Error()
+	}
+	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": obj})
 }
 
 func (a *App) handleSystemXrayRealityGen(w http.ResponseWriter, r *http.Request) {

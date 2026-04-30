@@ -7,3 +7,12 @@ data/*.sqlite
 
 # logs
 *.log
+# local backups
+backups/
+# runtime generated files
+data/*.db-*
+data/*.db-shm
+data/*.db-wal
+data/*.json
+data/*.jsonl
+data/*.json.*

@@ -156,6 +156,55 @@ func (s *SQLiteStore) ChangeUserPassword(username, oldPassword, newPassword stri
 	return true, nil
 }
 
+func (s *SQLiteStore) ChangeUsername(oldUsername, newUsername string) (bool, error) {
+	oldUsername = strings.TrimSpace(oldUsername)
+	newUsername = strings.TrimSpace(newUsername)
+	if oldUsername == "" || newUsername == "" {
+		return false, nil
+	}
+	if oldUsername == newUsername {
+		return true, nil
+	}
+	var existing model.UserDB
+	err := s.db.Where("username = ?", newUsername).First(&existing).Error
+	if err == nil {
+		return false, nil
+	}
+	if err != gorm.ErrRecordNotFound {
+		return false, err
+	}
+	var u model.UserDB
+	err = s.db.Where("username = ?", oldUsername).First(&u).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return false, nil
+		}
+		return false, err
+	}
+	u.Username = newUsername
+	if err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Save(&u).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&model.TokenDB{}).Where("username = ?", oldUsername).Update("username", newUsername).Error; err != nil {
+			return err
+		}
+		var p model.PanelSettingDB
+		if err := tx.First(&p).Error; err == nil {
+			p.Username = newUsername
+			if err := tx.Save(&p).Error; err != nil {
+				return err
+			}
+		} else if err != gorm.ErrRecordNotFound {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func (s *SQLiteStore) CheckUser(username, password string) (bool, time.Time, error) {
 	var u model.UserDB
 	err := s.db.Where("username = ?", username).First(&u).Error
