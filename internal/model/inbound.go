@@ -1,5 +1,25 @@
 package model
 
+type ChainConfig struct {
+	Enabled              bool   `json:"enabled"`
+	Type                 string `json:"type"`
+	Host                 string `json:"host"`
+	Port                 int    `json:"port"`
+	DomainFilter         string `json:"domainFilter"`
+	EnhanceDomainRouting bool   `json:"enhanceDomainRouting"`
+	UDP443Policy         string `json:"udp443Policy"`
+	User                 string `json:"user"`
+	Pass                 string `json:"pass"`
+	UUID                 string `json:"uuid"`
+	ServerName           string `json:"serverName"`
+	PublicKey            string `json:"publicKey"`
+	ShortID              string `json:"shortId"`
+	Flow                 string `json:"flow"`
+	Fingerprint          string `json:"fingerprint"`
+	Method               string `json:"method"`
+	Password             string `json:"password"`
+}
+
 type Inbound struct {
 	ID               int64          `json:"id"`
 	Remark           string         `json:"remark"`
@@ -23,6 +43,7 @@ type Inbound struct {
 	Settings         map[string]any `json:"settings,omitempty"`
 	Stream           map[string]any `json:"streamSettings,omitempty"`
 	Extra            map[string]any `json:"extra,omitempty"`
+	Chain            ChainConfig    `json:"chain,omitempty"`
 	SniffingEnabled  bool           `json:"sniffingEnabled"`
 	SniffingOverride string         `json:"sniffingDestOverride,omitempty"`
 	CreateUnix       int64          `json:"createUnix"`
@@ -142,4 +163,5 @@ type AddInboundRequest struct {
 	HY2DisableMTUDisc    *bool                `json:"hy2DisableMtuDiscovery"`
 	SettingsOverride     map[string]any       `json:"settingsOverride"`
 	StreamOverride       map[string]any       `json:"streamOverride"`
+	Chain                ChainConfig          `json:"chain"`
 }

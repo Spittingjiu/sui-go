@@ -161,7 +161,6 @@
             <div class="row quick-create-actions">
               <button id="oneClickHy2">一键 HY2</button>
               <button id="oneClickReality" class="ghost">一键 Reality</button>
-              <button id="oneClickTrojan" class="ghost">一键 Trojan</button>
               <button class="ghost" onclick="openCreateModal()">高级编辑</button>
             </div>
           </div>
@@ -201,9 +200,10 @@
               <div id="f-dokodemo" class="field-grid hidden"><div class="form-field span-4"><label for="dokoAddr">目标地址</label><input id="dokoAddr" placeholder="1.1.1.1" /></div><div class="form-field span-2"><label for="dokoPort">目标端口</label><input id="dokoPort" placeholder="53" /></div></div>
               <div id="f-wireguard" class="field-grid hidden"><div class="form-field span-3"><label for="wgSecret">WireGuard 私钥</label><input id="wgSecret" placeholder="secretKey" /></div><div class="form-field span-3"><label for="wgAddr">Peer Allowed IP</label><input id="wgAddr" placeholder="10.0.0.2/32" /></div><div class="form-field span-2"><label for="wgMtu">MTU</label><input id="wgMtu" placeholder="1420" value="1420" /></div></div>
               <div id="f-tun" class="field-grid hidden"><div class="form-field span-2"><label for="tunName">TUN 名称</label><input id="tunName" placeholder="xray0" value="xray0" /></div><div class="form-field span-2"><label for="tunMtu">MTU</label><input id="tunMtu" placeholder="1500" value="1500" /></div><div class="form-field span-2"><label for="tunStack">协议栈</label><input id="tunStack" placeholder="system" value="system" /></div></div>
+              <div id="f-chain" class="field-grid"><div class="form-field span-2"><label for="chainEnabled">链式代理</label><select id="chainEnabled"><option value="0">关闭</option><option value="1">开启</option></select></div><div class="form-field span-2"><label for="chainType">下游类型</label><select id="chainType"><option value="socks5">socks5</option><option value="http">http</option><option value="reality">reality(vless)</option><option value="shadowsocks">shadowsocks</option></select></div><div class="form-field span-3"><label for="chainDomain">域名规则</label><input id="chainDomain" placeholder="可空；example.com / .example.com，逗号或换行" /></div><div class="form-field span-2"><label for="chainEnhance">分流增强</label><select id="chainEnhance"><option value="1">开启</option><option value="0">关闭</option></select></div><div class="form-field span-2"><label for="chainUdp443">UDP/443</label><select id="chainUdp443"><option value="block">拦截</option><option value="direct">直连</option></select></div><button id="chainTest" type="button" class="ghost span-1">测试</button><div class="form-field span-3"><label for="chainHost">下游 Host</label><input id="chainHost" placeholder="host / ip" /></div><div class="form-field span-1"><label for="chainPort">端口</label><input id="chainPort" placeholder="port" /></div><div class="form-field span-2 chain-auth"><label for="chainUser">账号</label><input id="chainUser" placeholder="可空" /></div><div class="form-field span-2 chain-auth"><label for="chainPass">密码</label><input id="chainPass" placeholder="可空" /></div><div class="form-field span-3 chain-reality"><label for="chainUuid">Reality UUID</label><input id="chainUuid" placeholder="下游 UUID" /></div><div class="form-field span-2 chain-reality"><label for="chainServerName">Reality SNI</label><input id="chainServerName" placeholder="serverName" /></div><div class="form-field span-3 chain-reality"><label for="chainPublicKey">Reality Public Key</label><input id="chainPublicKey" placeholder="publicKey" /></div><div class="form-field span-2 chain-reality"><label for="chainShortId">Reality Short ID</label><input id="chainShortId" placeholder="shortId" /></div><div class="form-field span-2 chain-reality"><label for="chainFlow">Reality Flow</label><input id="chainFlow" placeholder="xtls-rprx-vision" /></div><div class="form-field span-2 chain-ss"><label for="chainMethod">SS Method</label><input id="chainMethod" placeholder="aes-128-gcm" /></div><div class="form-field span-3 chain-ss"><label for="chainPassword">SS Password</label><input id="chainPassword" placeholder="password" /></div></div>
               <div class="row editor-actions" style="margin-top:16px"><button id="submitEditor">创建节点</button><button id="reset" class="ghost">重新填写</button><button type="button" class="ghost" onclick="closeEditorModal()">取消</button><div id="editorActionHint" class="muted">提交后自动刷新列表。</div></div><pre id="addOut"></pre>
             </div>
-            <aside class="panel"><div class="section-head"><div><h3>快速创建</h3><div class="note">常用模板放在编辑器旁边，不打断当前工作流。</div></div></div><div class="compact-actions"><button id="quickHy2">HY2 模板</button><button id="quickVlessReality" class="ghost">VLESS + REALITY</button><button id="quickTrojan" class="ghost">Trojan TLS</button></div></aside>
+            <aside class="panel"><div class="section-head"><div><h3>快速创建</h3><div class="note">常用模板放在编辑器旁边，不打断当前工作流。</div></div></div><div class="compact-actions"><button id="quickHy2">HY2 模板</button><button id="quickVlessReality" class="ghost">VLESS + REALITY</button></div></aside>
           </div>
           </div>
         </section>
@@ -338,6 +338,8 @@ function updateFieldVisibility(){
   const isDoko = p==='dokodemo-door' || p==='dokodemo';
   const isWG = p==='wireguard';
   const isTun = p==='tun';
+  const chainOn = $('chainEnabled')?.value === '1';
+  const chainType = $('chainType')?.value || 'socks5';
   const hasTransport = isVless || isVmess || isTrojan;
   const hasTlsLike = isHy2 || sec==='tls' || sec==='reality';
   const usesHostPath = hasTransport && ['ws','xhttp','httpupgrade','grpc','http'].includes(net);
@@ -363,6 +365,12 @@ function updateFieldVisibility(){
   $('f-dokodemo').classList.toggle('hidden', !isDoko);
   $('f-wireguard').classList.toggle('hidden', !isWG);
   $('f-tun').classList.toggle('hidden', !isTun);
+  $('f-chain')?.classList.toggle('hidden', false);
+  document.querySelectorAll('.chain-auth').forEach(el=>el.classList.toggle('hidden', !(chainOn && (chainType==='socks5' || chainType==='http'))));
+  document.querySelectorAll('.chain-reality').forEach(el=>el.classList.toggle('hidden', !(chainOn && chainType==='reality')));
+  document.querySelectorAll('.chain-ss').forEach(el=>el.classList.toggle('hidden', !(chainOn && chainType==='shadowsocks')));
+  ['chainHost','chainPort','chainDomain','chainEnhance','chainUdp443'].forEach(id=>$(id)?.closest('.form-field')?.classList.toggle('hidden', !chainOn));
+  $('chainTest')?.classList.toggle('hidden', !chainOn);
   ensureUuid(false);
 }
 
@@ -432,7 +440,25 @@ function getPayload(){
     tunMtu:Number($('tunMtu').value||0),
     tunStack:($('tunStack').value||'').trim(),
     tunAutoRoute:true,
-    tunStrictRoute:false
+    tunStrictRoute:false,
+    chain:{
+      enabled:$('chainEnabled').value==='1',
+      type:$('chainType').value,
+      host:($('chainHost').value||'').trim(),
+      port:Number($('chainPort').value||0),
+      domainFilter:($('chainDomain').value||'').trim(),
+      enhanceDomainRouting:$('chainEnhance').value==='1',
+      udp443Policy:$('chainUdp443').value||'block',
+      user:($('chainUser').value||'').trim(),
+      pass:$('chainPass').value||'',
+      uuid:($('chainUuid').value||'').trim(),
+      serverName:($('chainServerName').value||'').trim(),
+      publicKey:($('chainPublicKey').value||'').trim(),
+      shortId:($('chainShortId').value||'').trim(),
+      flow:($('chainFlow').value||'').trim(),
+      method:($('chainMethod').value||'').trim()||'aes-128-gcm',
+      password:$('chainPassword').value||''
+    }
   };
 }
 
@@ -470,6 +496,23 @@ function fillForm(x){
   $('tunName').value = x?.settings?.name || 'xray0';
   $('tunMtu').value = x?.settings?.mtu || 1500;
   $('tunStack').value = x?.settings?.stack || 'system';
+  const ch = x.chain || {};
+  $('chainEnabled').value = ch.enabled ? '1' : '0';
+  $('chainType').value = ch.type || 'socks5';
+  $('chainDomain').value = ch.domainFilter || '';
+  $('chainEnhance').value = ch.enhanceDomainRouting===false ? '0' : '1';
+  $('chainUdp443').value = ch.udp443Policy || 'block';
+  $('chainHost').value = ch.host || '';
+  $('chainPort').value = ch.port || '';
+  $('chainUser').value = ch.user || '';
+  $('chainPass').value = ch.pass || '';
+  $('chainUuid').value = ch.uuid || '';
+  $('chainServerName').value = ch.serverName || '';
+  $('chainPublicKey').value = ch.publicKey || '';
+  $('chainShortId').value = ch.shortId || '';
+  $('chainFlow').value = ch.flow || '';
+  $('chainMethod').value = ch.method || 'aes-128-gcm';
+  $('chainPassword').value = ch.password || '';
   const hop = (((x.streamSettings||{}).hysteriaSettings||{}).udphop)||{};
   $('hopPorts').value = hop.ports || '';
   $('hopInt').value = hop.interval || '';
@@ -491,13 +534,6 @@ function applyPreset(kind){
     $('sec').value='reality';
     applyRealityTarget(realityTargetPool[0]);
     $('path').value='/';
-
-  }else if(kind==='trojan'){
-    $('proto').value='trojan';
-    $('remark').value='trojan-quick';
-    $('net').value='tcp';
-    $('sec').value='tls';
-    $('sni').value='www.bing.com';
   }
   updateFieldVisibility();
   $('addOut').textContent='已应用快速模板，可直接创建';
@@ -551,18 +587,11 @@ function prepareQuick(kind){
     ensureUuid(true);
     return;
   }
-  if(kind==='trojan'){
-    applyPreset('trojan');
-    $('remark').value='trojan-'+suffix;
-    $('port').value=String(nextPort(44400));
-    $('pwd').value=randToken(18);
-    return;
-  }
 }
 
 async function quickCreate(kind){
-  const label = kind==='hy2' ? 'HY2' : (kind==='reality' ? 'Reality' : 'Trojan');
-  const buttons=['oneClickHy2','oneClickReality','oneClickTrojan','emptyOneClickHy2'].map(id=>$(id)).filter(Boolean);
+  const label = kind==='hy2' ? 'HY2' : 'Reality';
+  const buttons=['oneClickHy2','oneClickReality','emptyOneClickHy2'].map(id=>$(id)).filter(Boolean);
   try{
     buttons.forEach(b=>{b.disabled=true; b.dataset.oldText=b.textContent; b.textContent='创建中…';});
     prepareQuick(kind);
@@ -617,6 +646,22 @@ function resetForm(){
   $('tunName').value='xray0';
   $('tunMtu').value='1500';
   $('tunStack').value='system';
+  $('chainEnabled').value='0';
+  $('chainType').value='socks5';
+  $('chainDomain').value='';
+  $('chainEnhance').value='1';
+  $('chainUdp443').value='block';
+  $('chainHost').value='';
+  $('chainPort').value='';
+  $('chainUser').value='';
+  $('chainPass').value='';
+  $('chainUuid').value='';
+  $('chainServerName').value='';
+  $('chainPublicKey').value='';
+  $('chainShortId').value='';
+  $('chainFlow').value='';
+  $('chainMethod').value='aes-128-gcm';
+  $('chainPassword').value='';
   $('hopPorts').value='25000-25010';
   $('hopInt').value='20-40';
   updateFieldVisibility();
@@ -895,6 +940,17 @@ async function applyCfg(){
   }catch(e){ $('cfgOut').textContent='应用失败: '+e.message; }
 }
 
+async function testChainConnectivity(){
+  if($('chainEnabled').value!=='1'){ setStatus('请先开启链式代理', false); return; }
+  const host=($('chainHost').value||'').trim();
+  const port=Number($('chainPort').value||0);
+  if(!host||!port){ setStatus('请先填写下游 Host/端口', false); return; }
+  try{
+    const j=await api('/api/system/chain/test',{method:'POST',body:JSON.stringify({host,port})});
+    setStatus(j.success?'下游连通性正常':(j.msg||'连通性失败'), !!j.success);
+  }catch(e){ setStatus('连通性测试失败: '+e.message, false); }
+}
+
 async function updatePanel(){
   if(!confirm('确认更新面板？将执行 git pull + go build 并自动重启 sui-go。')) return;
   try{
@@ -923,12 +979,13 @@ $('cycleRealityDest').onclick=cycleRealityTarget;
 $('genUuid').onclick=()=>ensureUuid(true);
 $('updatePanel').onclick=updatePanel;
 $('connectSub').onclick=connectSub;
+$('chainEnabled').onchange=updateFieldVisibility;
+$('chainType').onchange=updateFieldVisibility;
+$('chainTest').onclick=testChainConnectivity;
 $('quickHy2').onclick=()=>applyPreset('hy2');
 $('quickVlessReality').onclick=()=>applyPreset('vless-reality');
-$('quickTrojan').onclick=()=>applyPreset('trojan');
 if($('oneClickHy2')) $('oneClickHy2').onclick=()=>quickCreate('hy2');
 if($('oneClickReality')) $('oneClickReality').onclick=()=>quickCreate('reality');
-if($('oneClickTrojan')) $('oneClickTrojan').onclick=()=>quickCreate('trojan');
 if($('emptyOneClickHy2')) $('emptyOneClickHy2').onclick=()=>quickCreate('hy2');
 $('copyQrLink').onclick=async()=>{ try{ await navigator.clipboard.writeText($('qrLink').value||''); }catch{} };
 $('closeQr').onclick=()=>$('qrModal').classList.add('hidden');

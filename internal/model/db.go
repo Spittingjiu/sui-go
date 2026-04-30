@@ -27,6 +27,7 @@ type InboundDB struct {
 	Tag              string    `json:"tag"`
 	SniffingEnabled  bool      `json:"sniffingEnabled" gorm:"default:true"`
 	SniffingOverride string    `json:"sniffingDestOverride" gorm:"default:http,tls,quic"`
+	Chain            string    `json:"chain" gorm:"type:text"`
 	CreatedAt        time.Time `json:"createdAt"`
 	UpdatedAt        time.Time `json:"updatedAt"`
 }

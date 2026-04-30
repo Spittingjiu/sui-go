@@ -32,6 +32,7 @@ func NewSQLite(dbPath string) (*SQLiteStore, error) {
 	}
 	_ = db.Exec("ALTER TABLE inbound_dbs ADD COLUMN sniffing_enabled numeric DEFAULT 1").Error
 	_ = db.Exec("ALTER TABLE inbound_dbs ADD COLUMN sniffing_override text DEFAULT 'http,tls,quic'").Error
+	_ = db.Exec("ALTER TABLE inbound_dbs ADD COLUMN chain text DEFAULT '{}'").Error
 	_ = db.Exec("CREATE INDEX IF NOT EXISTS idx_inbound_dbs_port ON inbound_dbs(port)").Error
 	_ = db.Exec("CREATE INDEX IF NOT EXISTS idx_inbound_dbs_protocol ON inbound_dbs(protocol)").Error
 	_ = db.Exec("CREATE INDEX IF NOT EXISTS idx_inbound_dbs_enable ON inbound_dbs(enable)").Error
@@ -44,6 +45,43 @@ func NewSQLite(dbPath string) (*SQLiteStore, error) {
 		sqldb.SetConnMaxIdleTime(10 * time.Minute)
 	}
 	return &SQLiteStore{db: db}, nil
+}
+
+func dbRowToInbound(r model.InboundDB) model.Inbound {
+	var settings map[string]any
+	var stream map[string]any
+	var chain model.ChainConfig
+	_ = json.Unmarshal([]byte(r.Settings), &settings)
+	_ = json.Unmarshal([]byte(r.Stream), &stream)
+	_ = json.Unmarshal([]byte(r.Chain), &chain)
+	return model.Inbound{
+		ID:               int64(r.ID),
+		Remark:           r.Remark,
+		Port:             r.Port,
+		Protocol:         r.Protocol,
+		Password:         r.Password,
+		UUID:             r.UUID,
+		Email:            r.Email,
+		Method:           r.Method,
+		Flow:             r.Flow,
+		Network:          r.Network,
+		Security:         r.Security,
+		SNI:              r.SNI,
+		Host:             r.Host,
+		Path:             r.Path,
+		RealityDest:      r.RealityDest,
+		ShortID:          r.ShortID,
+		PublicKey:        r.PublicKey,
+		PrivateKey:       r.PrivateKey,
+		Enable:           r.Enable,
+		Settings:         settings,
+		Stream:           stream,
+		Chain:            chain,
+		SniffingEnabled:  r.SniffingEnabled,
+		SniffingOverride: r.SniffingOverride,
+		CreateUnix:       r.CreatedAt.Unix(),
+		UpdateUnix:       r.UpdatedAt.Unix(),
+	}
 }
 
 func (s *SQLiteStore) EnsureDefaultPanelSetting(username string) error {
@@ -257,37 +295,7 @@ func (s *SQLiteStore) ListInbounds() ([]model.Inbound, error) {
 	}
 	out := make([]model.Inbound, 0, len(rows))
 	for _, r := range rows {
-		var settings map[string]any
-		var stream map[string]any
-		_ = json.Unmarshal([]byte(r.Settings), &settings)
-		_ = json.Unmarshal([]byte(r.Stream), &stream)
-		out = append(out, model.Inbound{
-			ID:               int64(r.ID),
-			Remark:           r.Remark,
-			Port:             r.Port,
-			Protocol:         r.Protocol,
-			Password:         r.Password,
-			UUID:             r.UUID,
-			Email:            r.Email,
-			Method:           r.Method,
-			Flow:             r.Flow,
-			Network:          r.Network,
-			Security:         r.Security,
-			SNI:              r.SNI,
-			Host:             r.Host,
-			Path:             r.Path,
-			RealityDest:      r.RealityDest,
-			ShortID:          r.ShortID,
-			PublicKey:        r.PublicKey,
-			PrivateKey:       r.PrivateKey,
-			Enable:           r.Enable,
-			Settings:         settings,
-			Stream:           stream,
-			SniffingEnabled:  r.SniffingEnabled,
-			SniffingOverride: r.SniffingOverride,
-			CreateUnix:       r.CreatedAt.Unix(),
-			UpdateUnix:       r.UpdatedAt.Unix(),
-		})
+		out = append(out, dbRowToInbound(r))
 	}
 	return out, nil
 }
@@ -334,42 +342,12 @@ func (s *SQLiteStore) GetInbound(id int64) (model.Inbound, bool, error) {
 		}
 		return model.Inbound{}, false, err
 	}
-	var settings map[string]any
-	var stream map[string]any
-	_ = json.Unmarshal([]byte(r.Settings), &settings)
-	_ = json.Unmarshal([]byte(r.Stream), &stream)
-	return model.Inbound{
-		ID:               int64(r.ID),
-		Remark:           r.Remark,
-		Port:             r.Port,
-		Protocol:         r.Protocol,
-		Password:         r.Password,
-		UUID:             r.UUID,
-		Email:            r.Email,
-		Method:           r.Method,
-		Flow:             r.Flow,
-		Network:          r.Network,
-		Security:         r.Security,
-		SNI:              r.SNI,
-		Host:             r.Host,
-		Path:             r.Path,
-		RealityDest:      r.RealityDest,
-		ShortID:          r.ShortID,
-		PublicKey:        r.PublicKey,
-		PrivateKey:       r.PrivateKey,
-		Enable:           r.Enable,
-		Settings:         settings,
-		Stream:           stream,
-		SniffingEnabled:  r.SniffingEnabled,
-		SniffingOverride: r.SniffingOverride,
-		CreateUnix:       r.CreatedAt.Unix(),
-		UpdateUnix:       r.UpdatedAt.Unix(),
-	}, true, nil
+	return dbRowToInbound(r), true, nil
 }
-
 func inboundToDBRow(in model.Inbound) model.InboundDB {
 	settings, _ := json.Marshal(in.Settings)
 	stream, _ := json.Marshal(in.Stream)
+	chain, _ := json.Marshal(in.Chain)
 	return model.InboundDB{
 		Remark:           in.Remark,
 		Port:             in.Port,
@@ -394,6 +372,7 @@ func inboundToDBRow(in model.Inbound) model.InboundDB {
 		Tag:              fmt.Sprintf("inbound-%d", time.Now().UnixNano()),
 		SniffingEnabled:  in.SniffingEnabled,
 		SniffingOverride: in.SniffingOverride,
+		Chain:            string(chain),
 	}
 }
 

@@ -300,6 +300,13 @@ func (a *App) handleMe(w http.ResponseWriter, r *http.Request) {
 	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "user": user, "panelPath": ps.PanelPath})
 }
 
+func (a *App) invalidateXrayConfigCache() {
+	a.cacheMu.Lock()
+	a.cacheKey = ""
+	a.cacheCfg = nil
+	a.cacheMu.Unlock()
+}
+
 func (a *App) handleListInbounds(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -413,6 +420,7 @@ func (a *App) handleAddInboundsBatch(w http.ResponseWriter, r *http.Request) {
 		a.writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	a.invalidateXrayConfigCache()
 	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "count": len(created), "obj": created})
 }
 
@@ -457,6 +465,7 @@ func (a *App) handleAddInbound(w http.ResponseWriter, r *http.Request) {
 		a.writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	a.invalidateXrayConfigCache()
 	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": created})
 }
 
@@ -526,6 +535,7 @@ func (a *App) handleInboundSub(w http.ResponseWriter, r *http.Request) {
 				a.writeErr(w, http.StatusNotFound, "not found")
 				return
 			}
+			a.invalidateXrayConfigCache()
 			a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": updated})
 		case http.MethodDelete:
 			ok, err := a.store.DeleteInbound(id)
@@ -537,6 +547,7 @@ func (a *App) handleInboundSub(w http.ResponseWriter, r *http.Request) {
 				a.writeErr(w, http.StatusNotFound, "not found")
 				return
 			}
+			a.invalidateXrayConfigCache()
 			a.writeJSON(w, http.StatusOK, map[string]any{"success": true})
 		default:
 			a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -607,6 +618,7 @@ func (a *App) handleInboundSub(w http.ResponseWriter, r *http.Request) {
 				a.writeErr(w, http.StatusNotFound, "not found")
 				return
 			}
+			a.invalidateXrayConfigCache()
 			a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": updated})
 			return
 		case "full":
@@ -815,6 +827,7 @@ func buildInboundFromReq(req model.AddInboundRequest) (model.Inbound, error) {
 		Settings:         map[string]any{},
 		Stream:           map[string]any{},
 		Extra:            map[string]any{},
+		Chain:            normalizeChainConfig(req.Chain),
 		SniffingEnabled:  true,
 		SniffingOverride: "http,tls,quic",
 	}
@@ -1736,6 +1749,28 @@ func validateAddInboundRequest(req model.AddInboundRequest) error {
 	if p := strings.TrimSpace(req.Path); p != "" && !strings.HasPrefix(p, "/") {
 		return fmt.Errorf("path must start with /")
 	}
+	chain := normalizeChainConfig(req.Chain)
+	if chain.Enabled {
+		if chain.Host == "" || chain.Port <= 0 || chain.Port > 65535 {
+			return fmt.Errorf("chain host/port required")
+		}
+		switch chain.Type {
+		case "socks5", "socks", "http", "shadowsocks", "ss", "reality":
+		default:
+			return fmt.Errorf("unsupported chain type: %s", chain.Type)
+		}
+		if chain.Type == "reality" {
+			if strings.TrimSpace(chain.UUID) == "" || !reUUID.MatchString(strings.TrimSpace(chain.UUID)) {
+				return fmt.Errorf("chain reality requires valid uuid")
+			}
+			if strings.TrimSpace(chain.PublicKey) == "" || strings.TrimSpace(chain.ServerName) == "" {
+				return fmt.Errorf("chain reality requires serverName/publicKey")
+			}
+		}
+		if (chain.Type == "shadowsocks" || chain.Type == "ss") && strings.TrimSpace(chain.Password) == "" {
+			return fmt.Errorf("chain shadowsocks requires password")
+		}
+	}
 
 	canonProto := proto
 	if canonProto == "ss" {
@@ -2139,8 +2174,10 @@ func computeInboundCacheKey(rows []model.Inbound) string {
 		_, _ = h.Write([]byte(fmt.Sprintf("%d|%s|%d|%s|%t|%s|", in.ID, in.Remark, in.Port, in.Protocol, in.Enable, in.SniffingOverride)))
 		sb, _ := json.Marshal(in.Settings)
 		stb, _ := json.Marshal(in.Stream)
+		cb, _ := json.Marshal(in.Chain)
 		_, _ = h.Write(sb)
 		_, _ = h.Write(stb)
+		_, _ = h.Write(cb)
 	}
 	return hex.EncodeToString(h.Sum(nil))
 }
@@ -2160,6 +2197,84 @@ func cloneAnyMap(in map[string]any) map[string]any {
 	return out
 }
 
+func normalizeChainConfig(c model.ChainConfig) model.ChainConfig {
+	c.Type = strings.ToLower(strings.TrimSpace(c.Type))
+	c.Host = strings.TrimSpace(c.Host)
+	c.DomainFilter = strings.TrimSpace(c.DomainFilter)
+	c.UDP443Policy = strings.ToLower(strings.TrimSpace(c.UDP443Policy))
+	if c.UDP443Policy == "" {
+		c.UDP443Policy = "block"
+	}
+	if c.Fingerprint == "" {
+		c.Fingerprint = "chrome"
+	}
+	if c.Method == "" {
+		c.Method = "aes-128-gcm"
+	}
+	if c.Flow == "" && c.Type == "reality" {
+		c.Flow = "xtls-rprx-vision"
+	}
+	return c
+}
+
+func parseChainDomainFilter(raw string) []string {
+	parts := strings.FieldsFunc(raw, func(r rune) bool { return r == ',' || r == '\n' || r == '\r' || r == ';' || r == '，' })
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		d := strings.ToLower(strings.TrimSpace(p))
+		d = strings.TrimPrefix(d, "http://")
+		d = strings.TrimPrefix(d, "https://")
+		d = strings.Split(d, "/")[0]
+		d = strings.TrimSpace(d)
+		if d == "" || strings.Contains(d, "*") || strings.Contains(d, " ") {
+			continue
+		}
+		clean := strings.TrimLeft(d, ".")
+		if clean == "" {
+			continue
+		}
+		labels := strings.Split(clean, ".")
+		if strings.HasPrefix(d, ".") || len(labels) <= 2 {
+			out = append(out, "domain:"+clean)
+		} else {
+			out = append(out, "full:"+clean)
+		}
+	}
+	return out
+}
+
+func buildChainOutbound(in model.Inbound) map[string]any {
+	c := normalizeChainConfig(in.Chain)
+	if !c.Enabled || c.Type == "" || c.Host == "" || c.Port <= 0 {
+		return nil
+	}
+	tag := fmt.Sprintf("chain-out-%d", in.ID)
+	switch c.Type {
+	case "socks5", "socks":
+		server := map[string]any{"address": c.Host, "port": c.Port}
+		if c.User != "" {
+			server["users"] = []map[string]any{{"user": c.User, "pass": c.Pass}}
+		}
+		return map[string]any{"tag": tag, "protocol": "socks", "settings": map[string]any{"servers": []map[string]any{server}}}
+	case "http":
+		server := map[string]any{"address": c.Host, "port": c.Port}
+		if c.User != "" {
+			server["users"] = []map[string]any{{"user": c.User, "pass": c.Pass}}
+		}
+		return map[string]any{"tag": tag, "protocol": "http", "settings": map[string]any{"servers": []map[string]any{server}}}
+	case "shadowsocks", "ss":
+		return map[string]any{"tag": tag, "protocol": "shadowsocks", "settings": map[string]any{"servers": []map[string]any{{"address": c.Host, "port": c.Port, "method": emptyDefault(c.Method, "aes-128-gcm"), "password": c.Password}}}}
+	case "reality":
+		return map[string]any{
+			"tag":            tag,
+			"protocol":       "vless",
+			"settings":       map[string]any{"vnext": []map[string]any{{"address": c.Host, "port": c.Port, "users": []map[string]any{{"id": c.UUID, "encryption": "none", "flow": emptyDefault(c.Flow, "xtls-rprx-vision")}}}}},
+			"streamSettings": map[string]any{"network": "tcp", "security": "reality", "realitySettings": map[string]any{"serverName": c.ServerName, "publicKey": c.PublicKey, "shortId": c.ShortID, "fingerprint": emptyDefault(c.Fingerprint, "chrome")}},
+		}
+	}
+	return nil
+}
+
 func (a *App) buildXrayConfig() (map[string]any, error) {
 	rows, err := a.store.ListInbounds()
 	if err != nil {
@@ -2174,7 +2289,9 @@ func (a *App) buildXrayConfig() (map[string]any, error) {
 	}
 	a.cacheMu.RUnlock()
 
-	inbounds := make([]map[string]any, 0, len(rows))
+	inbounds := make([]map[string]any, 0, len(rows)+1)
+	outbounds := []map[string]any{{"protocol": "freedom", "tag": "direct"}, {"protocol": "blackhole", "tag": "blocked"}}
+	rules := []map[string]any{{"type": "field", "inboundTag": []string{"api-in"}, "outboundTag": "api"}}
 	for _, in := range rows {
 		settings := in.Settings
 		stream := in.Stream
@@ -2198,8 +2315,14 @@ func (a *App) buildXrayConfig() (map[string]any, error) {
 				destOverride = tmp
 			}
 		}
+		inboundTag := fmt.Sprintf("inbound-%d", in.ID)
+		chainDomains := parseChainDomainFilter(in.Chain.DomainFilter)
+		if in.Chain.Enabled && len(chainDomains) > 0 && in.Chain.EnhanceDomainRouting {
+			in.SniffingEnabled = true
+			destOverride = []string{"http", "tls"}
+		}
 		inbounds = append(inbounds, map[string]any{
-			"tag":            fmt.Sprintf("inbound-%d", in.ID),
+			"tag":            inboundTag,
 			"listen":         "0.0.0.0",
 			"port":           in.Port,
 			"protocol":       in.Protocol,
@@ -2210,11 +2333,34 @@ func (a *App) buildXrayConfig() (map[string]any, error) {
 				"destOverride": destOverride,
 			},
 		})
+		if ob := buildChainOutbound(in); ob != nil {
+			outbounds = append(outbounds, ob)
+			obTag := fmt.Sprintf("chain-out-%d", in.ID)
+			if len(chainDomains) > 0 {
+				if in.Chain.EnhanceDomainRouting {
+					udpPolicy := "blocked"
+					if strings.EqualFold(in.Chain.UDP443Policy, "direct") {
+						udpPolicy = "direct"
+					}
+					rules = append(rules, map[string]any{"type": "field", "inboundTag": []string{inboundTag}, "network": "udp", "port": "443", "outboundTag": udpPolicy})
+				}
+				rules = append(rules, map[string]any{"type": "field", "inboundTag": []string{inboundTag}, "domain": chainDomains, "outboundTag": obTag})
+				rules = append(rules, map[string]any{"type": "field", "inboundTag": []string{inboundTag}, "outboundTag": "direct"})
+			} else {
+				rules = append(rules, map[string]any{"type": "field", "inboundTag": []string{inboundTag}, "outboundTag": obTag})
+			}
+		}
 	}
+	inbounds = append(inbounds, map[string]any{"tag": "api-in", "listen": "127.0.0.1", "port": 10085, "protocol": "dokodemo-door", "settings": map[string]any{"address": "127.0.0.1"}})
+	outbounds = append(outbounds, map[string]any{"protocol": "freedom", "tag": "api"})
 	cfg := map[string]any{
 		"log":       map[string]any{"loglevel": "warning"},
+		"api":       map[string]any{"tag": "api", "services": []string{"StatsService", "HandlerService"}},
+		"stats":     map[string]any{},
+		"policy":    map[string]any{"levels": map[string]any{"0": map[string]any{"statsUserUplink": true, "statsUserDownlink": true}}, "system": map[string]any{"statsInboundUplink": true, "statsInboundDownlink": true}},
 		"inbounds":  inbounds,
-		"outbounds": []map[string]any{{"protocol": "freedom", "tag": "direct"}, {"protocol": "blackhole", "tag": "block"}},
+		"outbounds": outbounds,
+		"routing":   map[string]any{"domainStrategy": "IPIfNonMatch", "rules": rules},
 	}
 	a.cacheMu.Lock()
 	a.cacheKey = key
