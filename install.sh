@@ -15,11 +15,18 @@ need_root() {
 }
 
 ensure_deps() {
-  if ! command -v git >/dev/null 2>&1; then
-    apt-get update -y && apt-get install -y git
-  fi
-  if ! command -v go >/dev/null 2>&1; then
-    apt-get update -y && apt-get install -y golang-go
+  local missing=()
+  for cmd in git go curl; do
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+      case "$cmd" in
+        go) missing+=(golang-go) ;;
+        *) missing+=("$cmd") ;;
+      esac
+    fi
+  done
+  if (( ${#missing[@]} > 0 )); then
+    apt-get update -y
+    DEBIAN_FRONTEND=noninteractive apt-get install -y "${missing[@]}"
   fi
 }
 
@@ -94,6 +101,84 @@ need_root(){
 
 pause(){ read -r -p "回车继续" _ || true; }
 
+ensure_cli_deps(){
+  if command -v curl >/dev/null 2>&1; then
+    return 0
+  fi
+  echo "检测到缺少依赖：curl，正在自动安装..."
+  if command -v apt-get >/dev/null 2>&1; then
+    apt-get update -y
+    DEBIAN_FRONTEND=noninteractive apt-get install -y curl
+  elif command -v yum >/dev/null 2>&1; then
+    yum install -y curl
+  elif command -v dnf >/dev/null 2>&1; then
+    dnf install -y curl
+  else
+    echo "无法自动安装依赖，请先安装：curl"
+    return 1
+  fi
+}
+
+json_obj(){
+  python3 - "$@" <<'PYJSON'
+import json, sys
+args = sys.argv[1:]
+out = {}
+for i in range(0, len(args), 2):
+    key = args[i]
+    val = args[i + 1] if i + 1 < len(args) else ""
+    out[key] = val
+print(json.dumps(out, ensure_ascii=False, separators=(",", ":")))
+PYJSON
+}
+
+json_get_string(){
+  local key="$1"
+  python3 -c 'import json,sys
+key=sys.argv[1]
+try:
+    data=json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+cur=data
+for part in key.split("."):
+    if isinstance(cur,dict):
+        cur=cur.get(part)
+    else:
+        cur=None
+        break
+if cur is None:
+    sys.exit(0)
+if isinstance(cur,(dict,list)):
+    print(json.dumps(cur,ensure_ascii=False))
+else:
+    print(cur)
+' "$key"
+}
+
+print_json_response(){
+  python3 -c 'import json,sys
+raw=sys.stdin.read()
+try:
+    data=json.loads(raw)
+except Exception:
+    print(raw)
+    sys.exit(0)
+for key in ("msg","error"):
+    val=data.get(key) if isinstance(data,dict) else None
+    if val not in (None,""):
+        print(val)
+        sys.exit(0)
+val=data.get("obj") if isinstance(data,dict) else data
+if isinstance(val,(dict,list)):
+    print(json.dumps(val,ensure_ascii=False))
+elif val is not None:
+    print(val)
+else:
+    print(json.dumps(data,ensure_ascii=False))
+'
+}
+
 get_env(){
   local k="$1" d="${2:-}"
   local v=""
@@ -132,8 +217,8 @@ api_login_token(){
   user="${1:-$(get_env PANEL_USER admin)}"
   pass="${2:-$(get_env PANEL_PASS admin123)}"
   curl -fsS -X POST "$base/auth/login" -H 'content-type: application/json' \
-    --data "$(jq -nc --arg username "$user" --arg password "$pass" '{username:$username,password:$password}')" \
-    | jq -r '.token // empty'
+    --data "$(json_obj username "$user" password "$pass")" \
+    | json_get_string token
 }
 
 current_user_from_db(){
@@ -177,7 +262,7 @@ change_account(){
   read -r -p "新用户名（留空不改）: " new_user
   if [[ -n "${new_user:-}" ]]; then
     curl -fsS -X POST "$base/api/panel/change-username" -H "Authorization: Bearer $token" -H 'content-type: application/json' \
-      --data "$(jq -nc --arg username "$new_user" '{username:$username}')" >/dev/null
+      --data "$(json_obj username "$new_user")" >/dev/null
     set_kv PANEL_USER "$new_user"
     old_user="$new_user"
     echo "用户名已更新"
@@ -185,7 +270,7 @@ change_account(){
   read -r -s -p "新密码（留空不改）: " new_pass; echo
   if [[ -n "${new_pass:-}" ]]; then
     curl -fsS -X POST "$base/api/panel/change-password" -H "Authorization: Bearer $token" -H 'content-type: application/json' \
-      --data "$(jq -nc --arg oldPassword "$old_pass" --arg newPassword "$new_pass" '{oldPassword:$oldPassword,newPassword:$newPassword}')" >/dev/null
+      --data "$(json_obj oldPassword "$old_pass" newPassword "$new_pass")" >/dev/null
     set_kv PANEL_PASS "$new_pass"
     echo "密码已更新"
   fi
@@ -230,8 +315,8 @@ connect_sub(){
   read -r -p "写入到 sub 的源名称（默认: sui-go）: " source_name
   source_name="${source_name:-sui-go}"
   curl -fsS -X POST "$base/api/panel/connect-sub" -H "Authorization: Bearer $token" -H 'content-type: application/json' \
-    --data "$(jq -nc --arg subUrl "$sub_url" --arg subUsername "$sub_user" --arg subPassword "$sub_pass" --arg sourceName "$source_name" '{subUrl:$subUrl,subUsername:$subUsername,subPassword:$subPassword,sourceName:$sourceName}')" \
-    | jq -r '.msg // .obj // .'
+    --data "$(json_obj subUrl "$sub_url" subUsername "$sub_user" subPassword "$sub_pass" sourceName "$source_name")" \
+    | print_json_response
 }
 
 update_panel(){
@@ -254,9 +339,9 @@ xray_update_menu(){
   token=$(api_login_token || true)
   [[ -n "$token" ]] || { echo "无法自动登录面板"; return 1; }
   info=$(curl -fsS "$base/api/system/xray/version-current" -H "Authorization: Bearer $token")
-  cur=$(echo "$info" | jq -r '.obj.current // "unknown"')
-  stable=$(echo "$info" | jq -r '.obj.stableLatest // empty')
-  dev=$(echo "$info" | jq -r '.obj.devLatest // empty')
+  cur=$(echo "$info" | json_get_string obj.current); cur=${cur:-unknown}
+  stable=$(echo "$info" | json_get_string obj.stableLatest)
+  dev=$(echo "$info" | json_get_string obj.devLatest)
   echo "当前版本: $cur"
   echo "稳定版最新: ${stable:-未知}"
   echo "开发版最新: ${dev:-未知}"
@@ -274,7 +359,7 @@ xray_update_menu(){
   read -r -p "确认更新 Xray 到 $ver ? 输入 YES: " ok
   [[ "$ok" == "YES" ]] || { echo "已取消"; return 0; }
   curl -fsS -X POST "$base/api/system/xray/switch" -H "Authorization: Bearer $token" -H 'content-type: application/json' \
-    --data "$(jq -nc --arg version "$ver" '{version:$version}')" | jq .
+    --data "$(json_obj version "$ver")" | print_json_response
 }
 
 uninstall_sui_go(){
@@ -305,6 +390,7 @@ uninstall_sui_go(){
 
 main_menu(){
   need_root
+  ensure_cli_deps
   while true; do
     echo "===== SUI-Go 菜单 ====="
     echo "1) 修改面板账号密码"
