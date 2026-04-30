@@ -578,7 +578,7 @@ async function quickCreate(kind){
     setStatus(label+' 已创建');
     $('linkOut').textContent=label+' 已创建：'+(obj.remark||'')+'  端口 '+(obj.port||$('port').value)+'\n可直接点该行“复制”或“二维码”。';
     if(obj.id) {
-      try { await copyFirstLink(Number(obj.id)); } catch(_e) {}
+      try { await copyFirstLink(Number(obj.id), {silent:true, prefix: label+' 已创建，节点链接：'}); } catch(_e) {}
     }
   }catch(e){
     openEditorModal('create');
@@ -702,17 +702,24 @@ function renderList(){
   $('tb').innerHTML = inboundHtml + forwardHtml || `<tr><td colspan="6" class="muted">没有匹配的节点</td></tr>`;
 }
 
-async function copyFirstLink(id){
+async function copyFirstLink(id, opts={}){
   try{
     const j=await api(`/api/inbounds/${id}/links`);
     const link=(j.obj||[])[0] || '';
     if(!link) throw new Error('空链接');
-    await navigator.clipboard.writeText(link);
-    $('linkOut').textContent='已复制节点链接：\n'+link;
-    setStatus('链接已复制');
+    try{
+      await navigator.clipboard.writeText(link);
+      $('linkOut').textContent='已复制节点链接：\n'+link;
+      setStatus('链接已复制');
+    }catch(_clipErr){
+      $('linkOut').textContent=(opts.prefix||'节点链接：')+'\n'+link;
+      if(!opts.silent) setStatus('复制受浏览器限制，可手动复制', false);
+    }
   }catch(e){
     try{ await loadLinks(id); }catch(_e){}
-    $('linkOut').textContent='复制失败，可手动复制下方链接： '+e.message+'\n'+($('linkOut').textContent||'');
+    if(!opts.silent){
+      $('linkOut').textContent='链接获取失败：'+e.message+'\n'+($('linkOut').textContent||'');
+    }
   }
 }
 
