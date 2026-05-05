@@ -16,7 +16,7 @@ need_root() {
 
 ensure_deps() {
   local missing=()
-  for cmd in git go curl unzip; do
+  for cmd in git go curl unzip sed grep; do
     if ! command -v "$cmd" >/dev/null 2>&1; then
       case "$cmd" in
         go) missing+=(golang-go) ;;
@@ -78,6 +78,70 @@ User=root
 [Install]
 WantedBy=multi-user.target
 EOF
+}
+
+
+bootstrap_ensure_xray_service(){
+  mkdir -p /usr/local/etc/xray /usr/local/share/xray
+  if [[ ! -f /usr/local/etc/xray/config.json ]]; then
+    cat >/usr/local/etc/xray/config.json <<'EOT'
+{"log":{"loglevel":"warning"},"inbounds":[],"outbounds":[{"protocol":"freedom","tag":"direct"}]}
+EOT
+  fi
+  cat >/etc/systemd/system/xray.service <<'EOT'
+[Unit]
+Description=Xray Service
+After=network.target nss-lookup.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/bin/xray run -config /usr/local/etc/xray/config.json
+Restart=on-failure
+RestartSec=3
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target
+EOT
+  systemctl daemon-reload
+  systemctl enable xray >/dev/null 2>&1 || true
+}
+
+bootstrap_latest_xray_version(){
+  local info ver
+  info=$(curl -fsSL https://api.github.com/repos/XTLS/Xray-core/releases/latest) || return 1
+  ver=$(printf "%s" "$info" | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n1)
+  [[ -n "$ver" ]] || return 1
+  printf "%s\n" "$ver"
+}
+
+bootstrap_install_xray(){
+  local ver tmp
+  ver=$(bootstrap_latest_xray_version || true)
+  if [[ -z "$ver" ]]; then
+    echo "无法获取 Xray 最新版本，跳过自动安装；可稍后运行 sui -> 安装/修复 Xray"
+    return 0
+  fi
+  bootstrap_ensure_xray_service
+  if command -v xray >/dev/null 2>&1 && xray version 2>/dev/null | head -n1 | grep -q "${ver#v}"; then
+    echo "Xray 已安装: $(xray version 2>/dev/null | head -n1)"
+    systemctl restart xray || true
+    return 0
+  fi
+  tmp=$(mktemp -d)
+  trap 'rm -rf "$tmp"' RETURN
+  echo "正在安装 Xray $ver ..."
+  curl -fL --retry 3 -o "$tmp/xray.zip" "https://github.com/XTLS/Xray-core/releases/download/$ver/Xray-linux-64.zip" || { echo "Xray 下载失败，跳过；可稍后运行 sui -> 安装/修复 Xray"; return 0; }
+  unzip -o "$tmp/xray.zip" -d "$tmp" >/dev/null || { echo "Xray 解压失败，跳过；可稍后运行 sui -> 安装/修复 Xray"; return 0; }
+  install -m 0755 "$tmp/xray" /usr/local/bin/xray
+  [[ -f "$tmp/geoip.dat" ]] && install -m 0644 "$tmp/geoip.dat" /usr/local/share/xray/geoip.dat || true
+  [[ -f "$tmp/geosite.dat" ]] && install -m 0644 "$tmp/geosite.dat" /usr/local/share/xray/geosite.dat || true
+  systemctl daemon-reload
+  systemctl enable xray >/dev/null 2>&1 || true
+  systemctl restart xray || true
+  xray version 2>/dev/null | head -n1 || true
 }
 
 write_sui_cli() {
@@ -344,6 +408,74 @@ EOT
   systemctl enable xray >/dev/null 2>&1 || true
 }
 
+ensure_xray_deps(){
+  local missing=()
+  for cmd in curl unzip grep sed; do
+    command -v "$cmd" >/dev/null 2>&1 || missing+=("$cmd")
+  done
+  if [[ ! -d /etc/ssl/certs ]]; then
+    missing+=(ca-certificates)
+  fi
+  if (( ${#missing[@]} > 0 )); then
+    if command -v apt-get >/dev/null 2>&1; then
+      apt-get update -y
+      DEBIAN_FRONTEND=noninteractive apt-get install -y "${missing[@]}"
+    elif command -v yum >/dev/null 2>&1; then
+      yum install -y "${missing[@]}"
+    elif command -v dnf >/dev/null 2>&1; then
+      dnf install -y "${missing[@]}"
+    else
+      echo "无法自动安装依赖: ${missing[*]}"
+      return 1
+    fi
+  fi
+}
+
+latest_xray_version(){
+  local info ver
+  info=$(curl -fsSL https://api.github.com/repos/XTLS/Xray-core/releases/latest) || return 1
+  ver=$(printf "%s" "$info" | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n1)
+  [[ -n "$ver" ]] || return 1
+  printf "%s\n" "$ver"
+}
+
+install_xray_version(){
+  local ver="$1" tmp
+  [[ -n "$ver" ]] || { echo "Xray 版本为空"; return 1; }
+  ensure_xray_deps
+  ensure_xray_service
+  if command -v xray >/dev/null 2>&1 && xray version 2>/dev/null | head -n1 | grep -q "${ver#v}"; then
+    echo "Xray 已安装: $(xray version 2>/dev/null | head -n1)"
+    systemctl restart xray || true
+    return 0
+  fi
+  tmp=$(mktemp -d)
+  trap 'rm -rf "$tmp"' RETURN
+  echo "正在安装 Xray $ver ..."
+  curl -fL --retry 3 -o "$tmp/xray.zip" "https://github.com/XTLS/Xray-core/releases/download/$ver/Xray-linux-64.zip"
+  unzip -o "$tmp/xray.zip" -d "$tmp" >/dev/null
+  install -m 0755 "$tmp/xray" /usr/local/bin/xray
+  [[ -f "$tmp/geoip.dat" ]] && install -m 0644 "$tmp/geoip.dat" /usr/local/share/xray/geoip.dat || true
+  [[ -f "$tmp/geosite.dat" ]] && install -m 0644 "$tmp/geosite.dat" /usr/local/share/xray/geosite.dat || true
+  systemctl daemon-reload
+  systemctl enable xray >/dev/null 2>&1 || true
+  systemctl restart xray || true
+  xray version 2>/dev/null | head -n1 || true
+}
+
+auto_install_xray(){
+  local ver
+  ver=$(latest_xray_version || true)
+  if [[ -z "$ver" ]]; then
+    echo "无法获取 Xray 最新版本，跳过自动安装；可稍后运行 sui -> 安装/修复 Xray"
+    return 0
+  fi
+  install_xray_version "$ver" || {
+    echo "Xray 自动安装失败；可稍后运行 sui -> 安装/修复 Xray"
+    return 0
+  }
+}
+
 install_xray(){
   local base token info stable dev ch ver
   if ! command -v unzip >/dev/null 2>&1; then
@@ -377,10 +509,7 @@ install_xray(){
     *) echo "无效选择"; return 1 ;;
   esac
   [[ -n "$ver" && "$ver" != "未知" ]] || { echo "目标版本为空"; return 1; }
-  curl -fsS -X POST "$base/api/system/xray/switch" -H "Authorization: Bearer $token" -H 'content-type: application/json'     --data "$(json_obj version "$ver")" | print_json_response
-  ensure_xray_service
-  systemctl restart xray || true
-  xray version 2>/dev/null | head -n1 || true
+  install_xray_version "$ver"
 }
 
 connect_sub(){
@@ -522,6 +651,7 @@ main() {
   write_env
   write_service
   write_sui_cli
+  bootstrap_install_xray
 
   systemctl daemon-reload
   systemctl enable --now sui-go
