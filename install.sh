@@ -128,12 +128,56 @@ bootstrap_latest_xray_version(){
   printf "%s\n" "$ver"
 }
 
-bootstrap_install_xray(){
-  local ver tmp
-  ver=$(bootstrap_latest_xray_version || true)
-  if [[ -z "$ver" ]]; then
-    echo "无法获取 Xray 最新版本，跳过自动安装；可稍后运行 sui -> 安装/修复 Xray"
+
+XRAY_PREFETCH_DIR=""
+XRAY_PREFETCH_PID=""
+XRAY_PREFETCH_VER=""
+
+prefetch_xray_async(){
+  if [[ -n "${XRAY_PREFETCH_PID:-}" ]]; then
     return 0
+  fi
+  if command -v xray >/dev/null 2>&1; then
+    return 0
+  fi
+  if ! command -v curl >/dev/null 2>&1; then
+    return 0
+  fi
+  XRAY_PREFETCH_DIR=$(mktemp -d)
+  (
+    set +e
+    ver=$(bootstrap_latest_xray_version 2>/dev/null) || exit 0
+    printf "%s" "$ver" > "$XRAY_PREFETCH_DIR/version"
+    curl -fL --retry 3 --connect-timeout 10 -o "$XRAY_PREFETCH_DIR/xray.zip" "https://github.com/XTLS/Xray-core/releases/download/$ver/Xray-linux-64.zip" >/dev/null 2>&1 || exit 0
+  ) &
+  XRAY_PREFETCH_PID=$!
+  echo "Xray 下载已后台预取（安装依赖/编译时并发进行）"
+}
+
+wait_xray_prefetch(){
+  if [[ -n "${XRAY_PREFETCH_PID:-}" ]]; then
+    wait "$XRAY_PREFETCH_PID" 2>/dev/null || true
+    XRAY_PREFETCH_PID=""
+  fi
+  if [[ -n "${XRAY_PREFETCH_DIR:-}" && -s "$XRAY_PREFETCH_DIR/version" && -s "$XRAY_PREFETCH_DIR/xray.zip" ]]; then
+    XRAY_PREFETCH_VER=$(cat "$XRAY_PREFETCH_DIR/version")
+    return 0
+  fi
+  return 1
+}
+
+bootstrap_install_xray(){
+  local ver tmp zip
+  if wait_xray_prefetch; then
+    ver="$XRAY_PREFETCH_VER"
+    zip="$XRAY_PREFETCH_DIR/xray.zip"
+    echo "使用后台预取的 Xray $ver"
+  else
+    ver=$(bootstrap_latest_xray_version || true)
+    if [[ -z "$ver" ]]; then
+      echo "无法获取 Xray 最新版本，跳过自动安装；可稍后运行 sui -> 安装/修复 Xray"
+      return 0
+    fi
   fi
   bootstrap_ensure_xray_service
   if command -v xray >/dev/null 2>&1 && xray version 2>/dev/null | head -n1 | grep -q "${ver#v}"; then
@@ -142,10 +186,13 @@ bootstrap_install_xray(){
     return 0
   fi
   tmp=$(mktemp -d)
-  trap 'rm -rf "$tmp"' RETURN
+  trap 'rm -rf "$tmp" "${XRAY_PREFETCH_DIR:-}"' RETURN
   echo "正在安装 Xray $ver ..."
-  curl -fL --retry 3 -o "$tmp/xray.zip" "https://github.com/XTLS/Xray-core/releases/download/$ver/Xray-linux-64.zip" || { echo "Xray 下载失败，跳过；可稍后运行 sui -> 安装/修复 Xray"; return 0; }
-  unzip -o "$tmp/xray.zip" -d "$tmp" >/dev/null || { echo "Xray 解压失败，跳过；可稍后运行 sui -> 安装/修复 Xray"; return 0; }
+  if [[ -z "${zip:-}" ]]; then
+    zip="$tmp/xray.zip"
+    curl -fL --retry 3 -o "$zip" "https://github.com/XTLS/Xray-core/releases/download/$ver/Xray-linux-64.zip" || { echo "Xray 下载失败，跳过；可稍后运行 sui -> 安装/修复 Xray"; return 0; }
+  fi
+  unzip -o "$zip" -d "$tmp" >/dev/null || { echo "Xray 解压失败，跳过；可稍后运行 sui -> 安装/修复 Xray"; return 0; }
   install -m 0755 "$tmp/xray" /usr/local/bin/xray
   [[ -f "$tmp/geoip.dat" ]] && install -m 0644 "$tmp/geoip.dat" /usr/local/share/xray/geoip.dat || true
   [[ -f "$tmp/geosite.dat" ]] && install -m 0644 "$tmp/geosite.dat" /usr/local/share/xray/geosite.dat || true
@@ -664,7 +711,9 @@ chmod +x /usr/local/bin/sui
 
 main() {
   need_root
+  prefetch_xray_async
   ensure_deps
+  prefetch_xray_async
   install_code
   build_bin
   mkdir -p /opt/sui-go/data
