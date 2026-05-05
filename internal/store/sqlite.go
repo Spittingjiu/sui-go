@@ -1,6 +1,8 @@
 package store
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -90,9 +92,17 @@ func (s *SQLiteStore) EnsureDefaultPanelSetting(username string) error {
 		return err
 	}
 	if cnt > 0 {
+		p, err := s.GetPanelSetting()
+		if err != nil {
+			return err
+		}
+		if strings.TrimSpace(p.APIToken) == "" {
+			p.APIToken = storeRandomToken(24)
+			return s.db.Save(&p).Error
+		}
 		return nil
 	}
-	p := model.PanelSettingDB{Username: username, PanelPath: "/", APIToken: ""}
+	p := model.PanelSettingDB{Username: username, PanelPath: "/", APIToken: storeRandomToken(24)}
 	return s.db.Create(&p).Error
 }
 
@@ -129,6 +139,17 @@ func (s *SQLiteStore) RotateAPIToken(token string) (model.PanelSettingDB, error)
 		return model.PanelSettingDB{}, err
 	}
 	return p, nil
+}
+
+func storeRandomToken(n int) string {
+	if n <= 0 {
+		n = 24
+	}
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		return fmt.Sprintf("%d", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(b)
 }
 
 func isBcryptHash(s string) bool {

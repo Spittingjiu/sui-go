@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -47,6 +48,8 @@ type App struct {
 	cacheMu  sync.RWMutex
 	cacheKey string
 	cacheCfg map[string]any
+	nonceMu  sync.Mutex
+	nonces   map[string]int64
 }
 
 func New(cfg Config) (*App, error) {
@@ -72,7 +75,7 @@ func New(cfg Config) (*App, error) {
 	if err := st.EnsureDefaultPanelSetting(cfg.PanelUser); err != nil {
 		return nil, err
 	}
-	a := &App{cfg: cfg, mux: http.NewServeMux(), store: st}
+	a := &App{cfg: cfg, mux: http.NewServeMux(), store: st, nonces: map[string]int64{}}
 	a.routes()
 	return a, nil
 }
@@ -84,6 +87,8 @@ func (a *App) Run() error {
 func (a *App) routes() {
 	a.mux.HandleFunc("/api/health", a.handleHealth)
 	a.mux.HandleFunc("/auth/login", a.handleLogin)
+	a.mux.HandleFunc("/auth/api-token", a.handleAPITokenLogin)
+	a.mux.HandleFunc("/auth/challenge", a.handleAuthChallenge)
 	a.mux.HandleFunc("/auth/refresh", a.handleRefresh)
 	a.mux.HandleFunc("/auth/logout", a.handleLogout)
 	a.mux.HandleFunc("/auth/me", a.handleMe)
@@ -239,6 +244,110 @@ func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
 		"panelPath":   "/",
 		"expiresUnix": expiresAt.Unix(),
 	})
+}
+
+func (a *App) handleAPITokenLogin(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		a.writeErr(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	ok, _, err := a.store.CheckUser(strings.TrimSpace(req.Username), req.Password)
+	if err != nil {
+		a.writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !ok {
+		a.writeErr(w, http.StatusUnauthorized, "invalid username/password")
+		return
+	}
+	p, err := a.store.GetPanelSetting()
+	if err != nil {
+		a.writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if strings.TrimSpace(p.APIToken) == "" {
+		p, err = a.store.RotateAPIToken(randomToken(24))
+		if err != nil {
+			a.writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "token": p.APIToken, "obj": map[string]any{"token": p.APIToken}, "token_type": "PanelToken"})
+}
+
+func (a *App) handleAuthChallenge(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	nonce := randomToken(18)
+	now := time.Now().Unix()
+	a.nonceMu.Lock()
+	if a.nonces == nil {
+		a.nonces = map[string]int64{}
+	}
+	for k, exp := range a.nonces {
+		if exp <= now {
+			delete(a.nonces, k)
+		}
+	}
+	a.nonces[nonce] = now + 90
+	a.nonceMu.Unlock()
+	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "nonce": nonce, "timestamp": now, "algorithm": "HMAC-SHA256", "windowSeconds": 60})
+}
+
+func tokenID(token string) string {
+	h := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(h[:])[:16]
+}
+func canonicalSignaturePayload(method, path, bodyHash, nonce, ts string) string {
+	return strings.ToUpper(method) + "\n" + path + "\n" + bodyHash + "\n" + nonce + "\n" + ts
+}
+func (a *App) consumeNonce(nonce string) bool {
+	now := time.Now().Unix()
+	a.nonceMu.Lock()
+	defer a.nonceMu.Unlock()
+	if a.nonces == nil {
+		a.nonces = map[string]int64{}
+	}
+	for k, exp := range a.nonces {
+		if exp <= now {
+			delete(a.nonces, k)
+		}
+	}
+	exp, ok := a.nonces[nonce]
+	if !ok || exp < now {
+		return false
+	}
+	delete(a.nonces, nonce)
+	return true
+}
+func (a *App) verifyHandshake(r *http.Request, token string) bool {
+	tid, nonce, ts, bh, sig := strings.TrimSpace(r.Header.Get("x-panel-token-id")), strings.TrimSpace(r.Header.Get("x-panel-nonce")), strings.TrimSpace(r.Header.Get("x-panel-timestamp")), strings.TrimSpace(r.Header.Get("x-panel-body-sha256")), strings.TrimSpace(r.Header.Get("x-panel-signature"))
+	if token == "" || tid == "" || nonce == "" || ts == "" || bh == "" || sig == "" || tid != tokenID(token) {
+		return false
+	}
+	ti, err := strconv.ParseInt(ts, 10, 64)
+	if err != nil {
+		return false
+	}
+	if d := time.Now().Unix() - ti; d < -60 || d > 60 {
+		return false
+	}
+	if !a.consumeNonce(nonce) {
+		return false
+	}
+	mac := hmac.New(sha256.New, []byte(token))
+	mac.Write([]byte(canonicalSignaturePayload(r.Method, r.URL.RequestURI(), bh, nonce, ts)))
+	return hmac.Equal([]byte(hex.EncodeToString(mac.Sum(nil))), []byte(sig))
 }
 
 func (a *App) handleRefresh(w http.ResponseWriter, r *http.Request) {
@@ -1183,6 +1292,16 @@ func (a *App) extractAuth(r *http.Request) (token, username string, ok bool) {
 	if tok == "" {
 		if c, err := r.Cookie("sui_go_token"); err == nil {
 			tok = strings.TrimSpace(c.Value)
+		}
+	}
+	if ps, perr := a.store.GetPanelSetting(); perr == nil {
+		pt := strings.TrimSpace(ps.APIToken)
+		if pt != "" && a.verifyHandshake(r, pt) {
+			u := strings.TrimSpace(ps.Username)
+			if u == "" {
+				u = "panel"
+			}
+			return pt, u, true
 		}
 	}
 	if tok == "" {
