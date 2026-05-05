@@ -174,6 +174,18 @@ need_root(){
   fi
 }
 
+APT_UPDATED=0
+apt_update_once(){
+  if (( APT_UPDATED == 0 )); then
+    apt-get update -y -o Acquire::Retries=2 -o Dpkg::Use-Pty=0
+    APT_UPDATED=1
+  fi
+}
+apt_install_fast(){
+  apt_update_once
+  DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends -o Dpkg::Use-Pty=0 "$@"
+}
+
 pause(){ read -r -p "回车继续" _ || true; }
 
 ensure_cli_deps(){
