@@ -14,6 +14,18 @@ need_root() {
   fi
 }
 
+APT_UPDATED=0
+apt_update_once(){
+  if (( APT_UPDATED == 0 )); then
+    apt-get update -y -o Acquire::Retries=2 -o Dpkg::Use-Pty=0
+    APT_UPDATED=1
+  fi
+}
+apt_install_fast(){
+  apt_update_once
+  DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends -o Dpkg::Use-Pty=0 "$@"
+}
+
 ensure_deps() {
   local missing=()
   for cmd in git go curl unzip sed grep; do
@@ -25,8 +37,7 @@ ensure_deps() {
     fi
   done
   if (( ${#missing[@]} > 0 )); then
-    apt-get update -y
-    DEBIAN_FRONTEND=noninteractive apt-get install -y "${missing[@]}"
+    apt_install_fast "${missing[@]}"
   fi
 }
 
@@ -171,8 +182,7 @@ ensure_cli_deps(){
   fi
   echo "检测到缺少依赖：curl，正在自动安装..."
   if command -v apt-get >/dev/null 2>&1; then
-    apt-get update -y
-    DEBIAN_FRONTEND=noninteractive apt-get install -y curl
+    apt_install_fast curl
   elif command -v yum >/dev/null 2>&1; then
     yum install -y curl
   elif command -v dnf >/dev/null 2>&1; then
@@ -418,8 +428,7 @@ ensure_xray_deps(){
   fi
   if (( ${#missing[@]} > 0 )); then
     if command -v apt-get >/dev/null 2>&1; then
-      apt-get update -y
-      DEBIAN_FRONTEND=noninteractive apt-get install -y "${missing[@]}"
+      apt_install_fast "${missing[@]}"
     elif command -v yum >/dev/null 2>&1; then
       yum install -y "${missing[@]}"
     elif command -v dnf >/dev/null 2>&1; then
@@ -480,8 +489,7 @@ install_xray(){
   local base token info stable dev ch ver
   if ! command -v unzip >/dev/null 2>&1; then
     if command -v apt-get >/dev/null 2>&1; then
-      apt-get update -y
-      DEBIAN_FRONTEND=noninteractive apt-get install -y unzip ca-certificates
+      apt_install_fast unzip ca-certificates
     elif command -v yum >/dev/null 2>&1; then
       yum install -y unzip ca-certificates
     elif command -v dnf >/dev/null 2>&1; then
