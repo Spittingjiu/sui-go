@@ -173,11 +173,11 @@
           <div class="section-grid">
             <div class="card"><div class="section-head"><div><h2 id="editorTitle">创建节点</h2><div id="editorNote" class="note">填必要参数即可。</div></div><button type="button" class="ghost modal-close" onclick="closeEditorModal()">关闭</button></div>
               <div class="field-grid">
-                <div class="form-field span-1"><label for="id">ID</label><input id="id" placeholder="自动" /></div>
+                <div class="form-field span-1"><label for="id">ID</label><input id="id" placeholder="自动" autocomplete="off" /></div>
                 <div class="form-field span-2"><label for="proto">协议</label><select id="proto"><option value="hysteria">hysteria2 (hy2)</option><option value="vless">vless</option><option value="vmess">vmess</option><option value="trojan">trojan</option><option value="shadowsocks">shadowsocks</option><option value="socks">socks</option><option value="dokodemo-door">dokodemo-door</option><option value="wireguard">wireguard</option><option value="tun">tun</option><option value="forward">port-forward</option></select></div>
-                <div class="form-field span-2"><label for="remark">备注</label><input id="remark" placeholder="节点名称" value="hy2-mvp" /></div>
-                <div class="form-field span-1"><label for="port">端口</label><input id="port" placeholder="24433" value="24433" /></div>
-                <div class="form-field span-2"><label for="sni">SNI / 伪装域名</label><input id="sni" placeholder="www.bing.com" value="www.bing.com" /></div>
+                <div class="form-field span-2"><label for="remark">备注</label><input id="remark" placeholder="节点名称" value="hy2-mvp" autocomplete="off" /></div>
+                <div class="form-field span-1"><label for="port">端口</label><input id="port" placeholder="24433" value="24433" autocomplete="off" /></div>
+                <div class="form-field span-2"><label for="sni">SNI / 伪装域名</label><input id="sni" placeholder="www.bing.com" value="www.bing.com" autocomplete="off" /></div>
               </div>
               <div id="f-vless" class="field-grid hidden">
                 <div id="uuidWrap" class="form-field inline-control span-3"><label for="uuid">UUID</label><input id="uuid" placeholder="自动生成" /><button id="genUuid" type="button" class="ghost">生成</button></div>
@@ -290,14 +290,28 @@ function openEditorModal(mode='create'){
 }
 
 function openCreateModal(){
+  // Create and edit share the same modal DOM. Always drop edit state first
+  // and reset again after the modal is visible, so the browser cannot keep
+  // values from the last edited inbound in the create flow.
+  editorMode = 'create';
   resetForm();
   $('addOut').textContent='';
   openEditorModal('create');
+  requestAnimationFrame(()=>{
+    if(editorMode==='create' && !$('sec-editor').classList.contains('hidden')){
+      resetForm();
+      $('addOut').textContent='';
+    }
+  });
 }
 
 function closeEditorModal(){
   $('sec-editor').classList.add('hidden');
   document.body.classList.remove('modal-open');
+  if(editorMode==='edit'){
+    editorMode = 'create';
+    $('addOut').textContent='';
+  }
 }
 
 function switchSection(targetId){
