@@ -893,6 +893,9 @@ func (a *App) normalizeAddInboundRequest(req model.AddInboundRequest) (model.Add
 		if strings.TrimSpace(req.Host) == "" {
 			req.Host = req.SNI
 		}
+		if strings.TrimSpace(req.Flow) == "" {
+			req.Flow = "xtls-rprx-vision"
+		}
 	}
 	return req, nil
 }
