@@ -199,7 +199,7 @@ bootstrap_install_xray(){
     return 0
   fi
   tmp=$(mktemp -d)
-  trap 'rm -rf "$tmp" "${XRAY_PREFETCH_DIR:-}"' RETURN
+  trap 'rm -rf "${tmp:-}" "${XRAY_PREFETCH_DIR:-}"; trap - RETURN' RETURN
   echo "正在安装 Xray $ver ..."
   if [[ -z "${zip:-}" ]]; then
     zip="$tmp/xray.zip"
@@ -531,7 +531,7 @@ install_xray_version(){
     return 0
   fi
   tmp=$(mktemp -d)
-  trap 'rm -rf "$tmp"' RETURN
+  trap 'rm -rf "${tmp:-}"; trap - RETURN' RETURN
   echo "正在安装 Xray $ver ..."
   curl -fL --retry 3 -o "$tmp/xray.zip" "https://github.com/XTLS/Xray-core/releases/download/$ver/Xray-linux-64.zip"
   unzip -o "$tmp/xray.zip" -d "$tmp" >/dev/null
