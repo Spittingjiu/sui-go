@@ -36,8 +36,20 @@ ensure_deps() {
       esac
     fi
   done
+  # gorm 的 sqlite 驱动 (mattn/go-sqlite3) 依赖 cgo，必须有 C 编译器；
+  # 否则会编译出“启动即崩”的 stub 二进制（Binary was compiled with 'CGO_ENABLED=0'）。
+  if ! command -v cc >/dev/null 2>&1 && ! command -v gcc >/dev/null 2>&1; then
+    case "$(command -v apt-get >/dev/null 2>&1 && echo apt || echo '')" in
+      apt) missing+=(build-essential) ;;
+    esac
+  fi
   if (( ${#missing[@]} > 0 )); then
     apt_install_fast "${missing[@]}"
+  fi
+  if ! command -v cc >/dev/null 2>&1 && ! command -v gcc >/dev/null 2>&1; then
+    echo "缺少 C 编译器 (cc/gcc)，sqlite 驱动需要 cgo，无法继续编译。" >&2
+    echo "请先安装 gcc / build-essential 后重试。" >&2
+    return 1
   fi
 }
 
@@ -53,7 +65,8 @@ install_code() {
 
 build_bin() {
   cd "$INSTALL_DIR"
-  go build -o sui-go ./cmd/sui-go
+  # 显式开启 cgo：gorm.io/driver/sqlite 依赖 mattn/go-sqlite3，纯 Go 构建会得到 stub。
+  CGO_ENABLED=1 go build -o sui-go ./cmd/sui-go
   install -m 0755 sui-go "$BIN_PATH"
 }
 
@@ -607,10 +620,14 @@ update_panel(){
     echo "$INSTALL_DIR 不是 git 仓库，无法自动更新面板源码。"
     return 1
   fi
+  if ! command -v cc >/dev/null 2>&1 && ! command -v gcc >/dev/null 2>&1; then
+    echo "缺少 C 编译器（sqlite 驱动需要 cgo），正在安装 build-essential..."
+    apt_install_fast build-essential
+  fi
   cd "$INSTALL_DIR"
   git fetch --all --prune
   git pull --ff-only origin "$(git rev-parse --abbrev-ref HEAD || echo main)"
-  go build -o sui-go ./cmd/sui-go
+  CGO_ENABLED=1 go build -o sui-go ./cmd/sui-go
   install -m 0755 sui-go "$BIN_PATH"
   reload_apply
   echo "sui-go 面板已更新并重启"
@@ -724,7 +741,13 @@ main() {
 
   systemctl daemon-reload
   systemctl enable --now sui-go
+  sleep 2
   systemctl status sui-go --no-pager -n 30 || true
+  if ! systemctl is-active --quiet sui-go; then
+    echo "⚠️ sui-go 未能正常启动，最近日志：" >&2
+    journalctl -u sui-go -n 20 --no-pager 2>/dev/null || true
+    exit 1
+  fi
 
   echo
   echo "安装完成。"
