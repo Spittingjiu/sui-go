@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+	"gorm.io/gorm/logger"
 )
 
 type SQLiteStore struct {
@@ -25,16 +27,36 @@ func NewSQLite(dbPath string) (*SQLiteStore, error) {
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		return nil, err
 	}
-	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
+	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{
+		// Token validation probes token_dbs on every request; a miss is normal and
+		// must not be logged as an error. IgnoreRecordNotFoundError keeps the
+		// journal clean while still surfacing real SQL errors.
+		Logger: logger.New(
+			log.New(os.Stderr, "", log.LstdFlags),
+			logger.Config{
+				SlowThreshold:             time.Second,
+				LogLevel:                  logger.Warn,
+				IgnoreRecordNotFoundError: true,
+				Colorful:                  false,
+			},
+		),
+	})
 	if err != nil {
 		return nil, err
 	}
 	if err := db.AutoMigrate(&model.InboundDB{}, &model.UserDB{}, &model.TokenDB{}, &model.ForwardDB{}, &model.PanelSettingDB{}); err != nil {
 		return nil, err
 	}
-	_ = db.Exec("ALTER TABLE inbound_dbs ADD COLUMN sniffing_enabled numeric DEFAULT 1").Error
-	_ = db.Exec("ALTER TABLE inbound_dbs ADD COLUMN sniffing_override text DEFAULT 'http,tls,quic'").Error
-	_ = db.Exec("ALTER TABLE inbound_dbs ADD COLUMN chain text DEFAULT '{}'").Error
+	// Legacy column supplements: only run when missing so startup stays quiet.
+	if !db.Migrator().HasColumn(&model.InboundDB{}, "sniffing_enabled") {
+		_ = db.Exec("ALTER TABLE inbound_dbs ADD COLUMN sniffing_enabled numeric DEFAULT 1").Error
+	}
+	if !db.Migrator().HasColumn(&model.InboundDB{}, "sniffing_override") {
+		_ = db.Exec("ALTER TABLE inbound_dbs ADD COLUMN sniffing_override text DEFAULT 'http,tls,quic'").Error
+	}
+	if !db.Migrator().HasColumn(&model.InboundDB{}, "chain") {
+		_ = db.Exec("ALTER TABLE inbound_dbs ADD COLUMN chain text DEFAULT '{}'").Error
+	}
 	_ = db.Exec("CREATE INDEX IF NOT EXISTS idx_inbound_dbs_port ON inbound_dbs(port)").Error
 	_ = db.Exec("CREATE INDEX IF NOT EXISTS idx_inbound_dbs_protocol ON inbound_dbs(protocol)").Error
 	_ = db.Exec("CREATE INDEX IF NOT EXISTS idx_inbound_dbs_enable ON inbound_dbs(enable)").Error
