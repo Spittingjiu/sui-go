@@ -804,9 +804,12 @@ func (a *App) normalizeAddInboundRequest(req model.AddInboundRequest) (model.Add
 		return req, fmt.Errorf("unsupported security: %s", req.Security)
 	}
 	if req.Port <= 0 {
-		np, err := a.store.NextInboundPort(20000)
-		if err != nil {
-			return req, err
+		np, err := a.store.RandomFreePort(10000, 60000)
+		if err != nil || np <= 0 {
+			np, err = a.store.NextInboundPort(20000)
+			if err != nil {
+				return req, err
+			}
 		}
 		req.Port = np
 	}
@@ -3328,7 +3331,10 @@ func (a *App) handleAddRealityQuick(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Port <= 0 {
-		np, _ := a.store.NextInboundPort(20000)
+		np, err := a.store.RandomFreePort(10000, 60000)
+		if err != nil || np <= 0 {
+			np, _ = a.store.NextInboundPort(20000)
+		}
 		req.Port = np
 	}
 	u := uuid.NewString()

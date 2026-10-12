@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	mrand "math/rand"
 	"os"
 	"path/filepath"
 	"strings"
@@ -637,4 +638,40 @@ func (s *SQLiteStore) NextInboundPort(base int) (int, error) {
 		p++
 	}
 	return p, nil
+}
+
+// RandomFreePort 在 [lo, hi] 区间内随机挑一个当前未被占用的端口。
+// 用于“一键 Reality”等场景，避免每次都从固定基址(20000)分配导致端口固定。
+func (s *SQLiteStore) RandomFreePort(lo, hi int) (int, error) {
+	if lo <= 0 {
+		lo = 10000
+	}
+	if hi <= 0 || hi > 65535 {
+		hi = 60000
+	}
+	if hi < lo {
+		lo, hi = hi, lo
+	}
+	rows, err := s.ListInbounds()
+	if err != nil {
+		return 0, err
+	}
+	used := map[int]bool{}
+	for _, r := range rows {
+		if r.Port > 0 {
+			used[r.Port] = true
+		}
+	}
+	span := hi - lo + 1
+	if span <= 0 {
+		return 0, fmt.Errorf("invalid port range %d-%d", lo, hi)
+	}
+	start := lo + mrand.Intn(span)
+	for i := 0; i < span; i++ {
+		p := lo + (start-lo+i)%span
+		if !used[p] {
+			return p, nil
+		}
+	}
+	return 0, fmt.Errorf("no free port in range %d-%d", lo, hi)
 }
