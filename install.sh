@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO="https://github.com/Spittingjiu/sui-go.git"
+REPO_SLUG="Spittingjiu/sui-go"
+REPO_URL="https://github.com/${REPO_SLUG}.git"
+RELEASES_BASE="https://github.com/${REPO_SLUG}/releases"
 INSTALL_DIR="/opt/sui-go"
 BIN_PATH="/usr/local/bin/sui-go"
 SERVICE_PATH="/etc/systemd/system/sui-go.service"
@@ -12,6 +14,18 @@ need_root() {
     echo "请用 root 运行: sudo bash install.sh"
     exit 1
   fi
+}
+
+# 目标架构（对应 release 资产名 sui-go-linux-<arch>）
+detect_arch() {
+  case "$(uname -m)" in
+    x86_64|amd64) echo amd64 ;;
+    aarch64|arm64) echo arm64 ;;
+    *)
+      echo "不支持的架构: $(uname -m)" >&2
+      return 1
+      ;;
+  esac
 }
 
 APT_UPDATED=0
@@ -26,9 +40,30 @@ apt_install_fast(){
   DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends -o Dpkg::Use-Pty=0 "$@"
 }
 
-ensure_deps() {
+# 默认装法只依赖 curl；不装 go/gcc，也不跑 go build —— 避免旧脚本在“装依赖 + 编 sqlite”阶段卡死。
+ensure_base_deps() {
   local missing=()
-  for cmd in git go curl unzip sed grep; do
+  command -v curl >/dev/null 2>&1 || missing+=(curl)
+  if (( ${#missing[@]} > 0 )); then
+    if command -v apt-get >/dev/null 2>&1; then
+      apt_install_fast "${missing[@]}"
+    elif command -v yum >/dev/null 2>&1; then
+      yum install -y "${missing[@]}"
+    elif command -v dnf >/dev/null 2>&1; then
+      dnf install -y "${missing[@]}"
+    elif command -v apk >/dev/null 2>&1; then
+      apk add --no-cache "${missing[@]}"
+    else
+      echo "缺少依赖: ${missing[*]}，且未找到受支持的包管理器" >&2
+      return 1
+    fi
+  fi
+}
+
+# 仅源码回退路径需要：git + go + C 编译器（sqlite 走 cgo）。
+ensure_build_deps() {
+  local missing=()
+  for cmd in git go; do
     if ! command -v "$cmd" >/dev/null 2>&1; then
       case "$cmd" in
         go) missing+=(golang-go) ;;
@@ -36,38 +71,80 @@ ensure_deps() {
       esac
     fi
   done
-  # gorm 的 sqlite 驱动 (mattn/go-sqlite3) 依赖 cgo，必须有 C 编译器；
-  # 否则会编译出“启动即崩”的 stub 二进制（Binary was compiled with 'CGO_ENABLED=0'）。
   if ! command -v cc >/dev/null 2>&1 && ! command -v gcc >/dev/null 2>&1; then
-    case "$(command -v apt-get >/dev/null 2>&1 && echo apt || echo '')" in
-      apt) missing+=(build-essential) ;;
-    esac
+    missing+=(build-essential)
   fi
   if (( ${#missing[@]} > 0 )); then
-    apt_install_fast "${missing[@]}"
+    if command -v apt-get >/dev/null 2>&1; then
+      apt_install_fast "${missing[@]}"
+    elif command -v yum >/dev/null 2>&1; then
+      yum install -y "${missing[@]}"
+    elif command -v dnf >/dev/null 2>&1; then
+      dnf install -y "${missing[@]}"
+    else
+      echo "缺少编译依赖: ${missing[*]}" >&2
+      return 1
+    fi
   fi
-  if ! command -v cc >/dev/null 2>&1 && ! command -v gcc >/dev/null 2>&1; then
-    echo "缺少 C 编译器 (cc/gcc)，sqlite 驱动需要 cgo，无法继续编译。" >&2
-    echo "请先安装 gcc / build-essential 后重试。" >&2
+}
+
+# 校验是否为 Linux ELF 可执行文件（防止把 404/HTML 当二进制装上）。
+is_elf() {
+  [[ -f "$1" ]] || return 1
+  [[ "$(head -c 4 "$1" | od -An -tx1 | tr -d ' \n')" == "7f454c46" ]]
+}
+
+# 首选：直接下载 GitHub Releases 里的预编译二进制（不会卡在 go build / 依赖下载）。
+download_binary() {
+  local arch tmp url
+  arch=$(detect_arch) || return 1
+  tmp=$(mktemp -d) || return 1
+  url="${RELEASES_BASE}/latest/download/sui-go-linux-${arch}"
+  echo "正在下载预编译二进制: $url"
+  if ! curl -fL --retry 3 --retry-delay 2 --connect-timeout 15 --max-time 300 -o "$tmp/sui-go" "$url"; then
+    echo "预编译二进制下载失败，回退到源码编译。"
+    rm -rf "$tmp"
     return 1
   fi
+  if ! is_elf "$tmp/sui-go"; then
+    echo "下载内容不是有效的 ELF 可执行文件（可能是 404/HTML），回退到源码编译。"
+    rm -rf "$tmp"
+    return 1
+  fi
+  install -m 0755 "$tmp/sui-go" "$BIN_PATH"
+  rm -rf "$tmp"
+  echo "已安装预编译二进制到 $BIN_PATH (arch=${arch})"
 }
 
-install_code() {
+# 回退：源码编译（强制 cgo；用国内 GOPROXY 镜像避免拉模块卡住）。
+source_build() {
+  echo "使用源码编译方式安装（回退模式）..."
+  ensure_build_deps || return 1
+  if ! command -v cc >/dev/null 2>&1 && ! command -v gcc >/dev/null 2>&1; then
+    echo "缺少 C 编译器 (cc/gcc)，sqlite 驱动需要 cgo，无法编译。" >&2
+    return 1
+  fi
+  export GIT_TERMINAL_PROMPT=0
   mkdir -p "$INSTALL_DIR"
   if [[ -d "$INSTALL_DIR/.git" ]]; then
-    git -C "$INSTALL_DIR" pull --ff-only
+    git -C "$INSTALL_DIR" fetch --all --prune || true
+    git -C "$INSTALL_DIR" pull --ff-only || true
   else
     rm -rf "$INSTALL_DIR"
-    git clone "$REPO" "$INSTALL_DIR"
+    git clone --depth 1 "$REPO_URL" "$INSTALL_DIR"
   fi
+  cd "$INSTALL_DIR"
+  echo "编译中（GOPROXY 已配镜像，避免下载卡住）..."
+  GOPROXY="${GOPROXY:-https://goproxy.cn,https://proxy.golang.org,direct}" \
+    GOTOOLCHAIN=local \
+    CGO_ENABLED=1 \
+    go build -trimpath -ldflags "-s -w" -o sui-go ./cmd/sui-go
+  install -m 0755 sui-go "$BIN_PATH"
+  echo "源码编译完成: $BIN_PATH"
 }
 
-build_bin() {
-  cd "$INSTALL_DIR"
-  # 显式开启 cgo：gorm.io/driver/sqlite 依赖 mattn/go-sqlite3，纯 Go 构建会得到 stub。
-  CGO_ENABLED=1 go build -o sui-go ./cmd/sui-go
-  install -m 0755 sui-go "$BIN_PATH"
+install_bin() {
+  download_binary || source_build
 }
 
 write_env() {
@@ -225,6 +302,7 @@ SERVICE=sui-go.service
 INSTALL_DIR=/opt/sui-go
 BIN_PATH=/usr/local/bin/sui-go
 DB_FILE_DEFAULT=/opt/sui-go/data/sui-go.db
+RELEASES_BASE=https://github.com/Spittingjiu/sui-go/releases
 XRAY_SERVICE=xray
 
 need_root(){
@@ -232,6 +310,14 @@ need_root(){
     echo "请用 root 运行：sudo sui"
     exit 1
   fi
+}
+
+detect_arch(){
+  case "$(uname -m)" in
+    x86_64|amd64) echo amd64 ;;
+    aarch64|arm64) echo arm64 ;;
+    *) return 1 ;;
+  esac
 }
 
 APT_UPDATED=0
@@ -615,20 +701,41 @@ connect_sub(){
     | print_json_response
 }
 
+is_elf(){
+  [[ -f "$1" ]] || return 1
+  [[ "$(head -c 4 "$1" | od -An -tx1 | tr -d ' \n')" == "7f454c46" ]]
+}
+
 update_panel(){
-  if [[ ! -d "$INSTALL_DIR/.git" ]]; then
-    echo "$INSTALL_DIR 不是 git 仓库，无法自动更新面板源码。"
-    return 1
+  local arch tmp url ok=0
+  arch=$(detect_arch 2>/dev/null || true)
+  tmp=$(mktemp -d)
+  if [[ -n "$arch" ]]; then
+    url="${RELEASES_BASE}/latest/download/sui-go-linux-${arch}"
+    echo "正在下载最新预编译二进制: $url"
+    if curl -fL --retry 3 --retry-delay 2 --connect-timeout 15 --max-time 300 -o "$tmp/sui-go" "$url" && is_elf "$tmp/sui-go"; then
+      install -m 0755 "$tmp/sui-go" "$BIN_PATH"
+      ok=1
+    fi
   fi
-  if ! command -v cc >/dev/null 2>&1 && ! command -v gcc >/dev/null 2>&1; then
-    echo "缺少 C 编译器（sqlite 驱动需要 cgo），正在安装 build-essential..."
-    apt_install_fast build-essential
+  rm -rf "$tmp"
+  if (( ok == 0 )); then
+    echo "二进制更新失败，回退到源码编译..."
+    if [[ ! -d "$INSTALL_DIR/.git" ]]; then
+      echo "$INSTALL_DIR 不是 git 仓库，无法源码编译更新。"
+      return 1
+    fi
+    if ! command -v cc >/dev/null 2>&1 && ! command -v gcc >/dev/null 2>&1; then
+      echo "缺少 C 编译器（sqlite 驱动需要 cgo），正在安装 build-essential..."
+      apt_install_fast build-essential
+    fi
+    cd "$INSTALL_DIR"
+    git fetch --all --prune || true
+    git pull --ff-only origin "$(git rev-parse --abbrev-ref HEAD || echo main)" || true
+    GOPROXY="${GOPROXY:-https://goproxy.cn,https://proxy.golang.org,direct}" GOTOOLCHAIN=local \
+      CGO_ENABLED=1 go build -trimpath -ldflags "-s -w" -o sui-go ./cmd/sui-go
+    install -m 0755 sui-go "$BIN_PATH"
   fi
-  cd "$INSTALL_DIR"
-  git fetch --all --prune
-  git pull --ff-only origin "$(git rev-parse --abbrev-ref HEAD || echo main)"
-  CGO_ENABLED=1 go build -o sui-go ./cmd/sui-go
-  install -m 0755 sui-go "$BIN_PATH"
   reload_apply
   echo "sui-go 面板已更新并重启"
 }
@@ -729,10 +836,9 @@ chmod +x /usr/local/bin/sui
 main() {
   need_root
   prefetch_xray_async
-  ensure_deps
+  ensure_base_deps
   prefetch_xray_async
-  install_code
-  build_bin
+  install_bin
   mkdir -p /opt/sui-go/data
   write_env
   write_service
