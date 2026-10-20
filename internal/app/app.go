@@ -117,6 +117,7 @@ func (a *App) routes() {
 	a.mux.HandleFunc("/api/panel/change-password", a.handlePanelChangePassword)
 	a.mux.HandleFunc("/api/panel/change-username", a.handlePanelChangeUsername)
 	a.mux.HandleFunc("/api/panel/connect-sub", a.handlePanelConnectSub)
+	a.mux.HandleFunc("/api/panel/subgo", a.handlePanelSubgo)
 
 	a.mux.HandleFunc("/api/system/status", a.handleSystemStatus)
 	a.mux.HandleFunc("/api/system/restart-panel", a.handleSystemRestartPanel)
@@ -868,25 +869,11 @@ func (a *App) normalizeAddInboundRequest(req model.AddInboundRequest) (model.Add
 		}
 	}
 	if proto == "vless" && strings.EqualFold(req.Security, "reality") {
+		// 优先用 xray x25519，缺失时回退到内置 X25519 生成器，
+		// 避免未装 Xray 的机器上一键 Reality 直接 127 失败。
+		a.fillRealityKeys(&req)
 		if strings.TrimSpace(req.PrivateKey) == "" || strings.TrimSpace(req.PublicKey) == "" {
-			out, err := a.runBestEffort("xray x25519 2>/dev/null")
-			if err == nil {
-				for _, ln := range strings.Split(out, "\n") {
-					s := strings.TrimSpace(ln)
-					if strings.HasPrefix(s, "PrivateKey:") && strings.TrimSpace(req.PrivateKey) == "" {
-						req.PrivateKey = strings.TrimSpace(strings.TrimPrefix(s, "PrivateKey:"))
-					}
-					if strings.HasPrefix(s, "Password (PublicKey):") && strings.TrimSpace(req.PublicKey) == "" {
-						req.PublicKey = strings.TrimSpace(strings.TrimPrefix(s, "Password (PublicKey):"))
-					}
-				}
-			}
-		}
-		if strings.TrimSpace(req.PrivateKey) == "" || strings.TrimSpace(req.PublicKey) == "" {
-			return req, fmt.Errorf("reality key generation failed: xray x25519 unavailable or parse failed")
-		}
-		if strings.TrimSpace(req.ShortID) == "" {
-			req.ShortID = strings.ReplaceAll(uuid.NewString(), "-", "")[:8]
+			return req, fmt.Errorf("reality key generation failed: built-in X25519 generator unavailable")
 		}
 		if strings.TrimSpace(req.RealityDest) == "" {
 			req.RealityDest = "www.icloud.com:443"
@@ -3692,26 +3679,22 @@ func (a *App) handleSystemXrayRealityGen(w http.ResponseWriter, r *http.Request)
 		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	out, err := a.runBestEffort("xray x25519 2>/dev/null")
-	if err != nil {
-		a.writeErr(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	pri, pub := "", ""
-	for _, ln := range strings.Split(out, "\n") {
-		s := strings.TrimSpace(ln)
-		if strings.HasPrefix(s, "PrivateKey:") {
-			pri = strings.TrimSpace(strings.TrimPrefix(s, "PrivateKey:"))
-		}
-		if strings.HasPrefix(s, "Password (PublicKey):") {
-			pub = strings.TrimSpace(strings.TrimPrefix(s, "Password (PublicKey):"))
-		}
+	pri, pub, sid, source := "", "", "", "builtin"
+	if kpPri, kpPub, ok := a.realityKeypairFromXray(); ok {
+		pri, pub, source = kpPri, kpPub, "xray"
 	}
 	if pri == "" || pub == "" {
-		a.writeErr(w, http.StatusInternalServerError, "failed to parse x25519 output")
+		// 没有 xray 二进制时也要能生成，一键创建不能因为 127 卡住。
+		pri, pub, sid = generateRealityKeypair()
+	}
+	if pri == "" || pub == "" {
+		a.writeErr(w, http.StatusInternalServerError, "failed to generate reality keypair")
 		return
 	}
-	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": map[string]any{"privateKey": pri, "publicKey": pub, "shortId": strings.ReplaceAll(uuid.NewString(), "-", "")[:8], "spiderX": "/"}})
+	if sid == "" {
+		sid = strings.ReplaceAll(uuid.NewString(), "-", "")[:8]
+	}
+	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": map[string]any{"privateKey": pri, "publicKey": pub, "shortId": sid, "spiderX": "/", "source": source}})
 }
 
 func (a *App) handleSystemXrayConfig(w http.ResponseWriter, r *http.Request) {

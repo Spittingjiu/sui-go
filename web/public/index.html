@@ -139,7 +139,7 @@
       <div class="nav-label">工作区</div>
       <div class="nav">
         <button class="nav-btn active" data-target="sec-list">节点</button>
-        <button class="nav-btn" data-target="sec-dashboard">概览 / SUB</button>
+        <button class="nav-btn" data-target="sec-dashboard">概览 / SUBGO</button>
         <button class="nav-btn" data-target="sec-xray">面板设置</button>
       </div>
       <div class="session"><div class="nav-label" style="margin-bottom:8px">状态</div><div id="loginStatus" class="status-pill">检查登录态…</div></div>
@@ -208,7 +208,7 @@
           </div>
         </section>
 
-        <section id="sec-dashboard" class="hidden"><div class="section-grid"><div class="card"><div class="section-head"><div><h2>概览</h2><div class="note">系统统计和面板维护。</div></div><button id="updatePanel" class="ghost">更新面板</button></div><div class="stats"><div class="stat"><div class="k">Inbound 总数</div><div class="v" id="stTotalMirror">—</div></div><div class="stat"><div class="k">当前默认入口</div><div class="v" style="font-size:24px">节点</div></div></div></div><aside class="panel"><h3>Connect Sub</h3><div class="note" style="margin:6px 0 14px">把当前面板节点源写入 sui-sub。</div><div class="field-grid"><input id="subUrl" class="span-12" placeholder="sui-sub 地址（如 https://sub.zzao.de）" /><input id="subUser" class="span-12" placeholder="用户名" /><input id="subPass" class="span-12" placeholder="密码" type="password" /><input id="subSourceName" class="span-12" placeholder="源名称（默认 sui-go）" value="sui-go" /><button id="connectSub" class="span-12">对接 SUB</button></div></aside></div></section>
+        <section id="sec-dashboard" class="hidden"><div class="section-grid"><div class="card"><div class="section-head"><div><h2>概览</h2><div class="note">系统统计和面板维护。</div></div><button id="updatePanel" class="ghost">更新面板</button></div><div class="stats"><div class="stat"><div class="k">Inbound 总数</div><div class="v" id="stTotalMirror">—</div></div><div class="stat"><div class="k">当前默认入口</div><div class="v" style="font-size:24px">节点</div></div></div></div><aside class="panel"><h3>一键对接 SUBGO</h3><div class="note" id="subgoState" style="margin:6px 0 10px">正在检测本机 SUBGO…</div><div class="field-grid"><input id="subgoUrl" class="span-12" placeholder="SUBGO 地址（本机默认 http://127.0.0.1:8781）" /><input id="subgoUser" class="span-12" placeholder="SUBGO 用户名" /><input id="subgoPass" class="span-12" placeholder="SUBGO 密码（保存后只需点一下）" type="password" /><input id="subgoSourceName" class="span-12" placeholder="源名称（默认 sui-go）" value="sui-go" /><button id="connectSubgo" class="span-12">一键推送到 SUBGO</button></div><div id="subgoOut" class="note" style="margin-top:10px;white-space:pre-wrap"></div></aside></div></section>
 
         <section id="sec-xray" class="card hidden"><div class="section-head"><div><h2>面板设置</h2><div class="note">账号、安全与 Xray 运行设置。</div></div></div><div class="panel" style="margin-bottom:14px;box-shadow:none"><div class="section-head" style="margin-bottom:8px"><div><h3>账号设置</h3><div class="note">修改登录用户名或密码。</div></div></div><div class="field-grid"><div class="form-field span-3"><label for="accountUsername">用户名</label><input id="accountUsername" placeholder="当前用户名" /></div><button id="saveUsername" class="span-2">保存用户名</button><div class="form-field span-3"><label for="oldPassword">旧密码</label><input id="oldPassword" type="password" autocomplete="current-password" placeholder="当前密码" /></div><div class="form-field span-3"><label for="newPassword">新密码</label><input id="newPassword" type="password" autocomplete="new-password" placeholder="至少 6 位" /></div><button id="savePassword" class="span-2">修改密码</button></div></div><div class="panel" style="margin-bottom:14px;box-shadow:none"><div class="section-head" style="margin-bottom:8px"><div><h3>Xray 更新</h3><div class="note">选择稳定版或开发版，检测后再决定是否更新。</div></div></div><div class="field-grid"><div class="form-field span-3"><label for="xrayChannel">更新通道</label><select id="xrayChannel"><option value="stable">稳定版</option><option value="dev">开发版</option></select></div><div class="xray-actions span-4"><button id="xrayVersionCheck" class="ghost">检测</button><button id="xrayUpdateSelected">更新到所选版本</button></div></div><div class="version-grid"><div class="version-box"><div class="k">当前版本</div><div class="v" id="xrayCurrentVersion">—</div></div><div class="version-box"><div class="k">稳定版最新</div><div class="v" id="xrayStableVersion">—</div></div><div class="version-box"><div class="k">开发版最新</div><div class="v" id="xrayDevVersion">—</div></div></div><div id="xrayVersionText" class="version-status">还没检测，点击“检测”。</div></div><div class="row"><button id="cfgShow" class="ghost">查看配置 JSON</button><button id="cfgExport" class="ghost">导出到文件</button><button id="cfgApply">导出并 Reload</button></div><pre id="cfgOut"></pre></section>
       </main>
@@ -325,6 +325,8 @@ function switchSection(targetId){
   document.querySelectorAll('.nav-btn').forEach(btn=>btn.classList.remove('active'));
   document.querySelector(`.nav-btn[data-target="${targetId}"]`)?.classList.add('active');
   if(targetId==='sec-xray'){ loadPanelAccount(); if($('xrayVersionText')?.textContent==='未检测') checkXrayVersion(); }
+  // 概览页打开时自动探测本机 SUBGO，省掉手填地址。
+  if(targetId==='sec-dashboard'){ refreshSubgo(); }
 }
 
 function syncStats(rows){
@@ -617,9 +619,10 @@ async function quickCreate(kind){
     setStatus(label+' 已创建');
     $('linkOut').textContent=label+' 已创建：'+(obj.remark||'')+'  端口 '+(obj.port||$('port').value)+'\n可直接点该行“复制”或“二维码”。';
   }catch(e){
-    openEditorModal('create');
-    $('addOut').textContent='极速创建失败：'+e.message+'\n已保留自动生成的参数，可修改后点“创建节点”。';
-    setStatus('创建失败: '+e.message, false);
+    // 一键就是点一下完成：失败也只在状态栏/输出区提示，
+    // 不再自动弹出表单让用户手动选参数。
+    $('addOut').textContent=label+' 创建失败：'+e.message;
+    setStatus(label+' 创建失败: '+e.message, false);
   }finally{
     buttons.forEach(b=>{b.disabled=false; b.textContent=b.dataset.oldText||b.textContent;});
   }
@@ -834,21 +837,53 @@ async function showQR(id){
   }catch(e){ $('linkOut').textContent='二维码生成失败: '+e.message; }
 }
 
-async function connectSub(){
+async function connectSubgo(oneClick){
+  const btn=$('connectSubgo');
+  const old=btn.textContent;
   try{
+    btn.disabled=true; btn.textContent='推送中…';
     const body={
-      subUrl: ($('subUrl').value||'').trim(),
-      subUsername: ($('subUser').value||'').trim(),
-      subPassword: ($('subPass').value||''),
-      sourceName: ($('subSourceName').value||'').trim() || 'sui-go',
+      url: ($('subgoUrl').value||'').trim(),
+      username: ($('subgoUser').value||'').trim(),
+      password: ($('subgoPass').value||''),
+      name: ($('subgoSourceName').value||'').trim() || 'sui-go',
     };
-    const j=await api('/api/panel/connect-sub',{method:'POST',body:JSON.stringify(body)});
-    $('cfgOut').textContent=JSON.stringify(j,null,2);
-    $('subPass').value='';
-    setStatus('SUB 对接成功', true);
+    const j=await api('/api/panel/subgo',{method:'POST',body:JSON.stringify(body)});
+    const o=j.obj||{};
+    $('subgoPass').value='';
+    $('subgoOut').textContent='已推送到 SUBGO\n地址：'+(o.subgoUrl||'')+'\n源：'+(o.sourceName||'')+'（id '+(o.sourceId||'-')+'）\n面板：'+(o.panelUrl||'');
+    setStatus('SUBGO 对接成功', true);
+    refreshSubgo();
+    try{ if(oneClick===undefined){ openSubgoLink(); } }catch(_e){}
   }catch(e){
-    $('cfgOut').textContent='SUB 对接失败: '+e.message;
-    setStatus('SUB 对接失败', false);
+    $('subgoOut').textContent='SUBGO 对接失败：'+e.message;
+    setStatus('SUBGO 对接失败: '+e.message, false);
+  }finally{
+    btn.disabled=false; btn.textContent=old;
+  }
+}
+
+function openSubgoLink(){
+  const u=($('subgoUrl').value||'').trim();
+  if(!u) return;
+  const href=/^https?:\/\//.test(u)?u:'http://'+u;
+  window.open(href,'_blank','noopener');
+}
+
+async function refreshSubgo(){
+  try{
+    const j=await api('/api/panel/subgo');
+    const o=j.obj||{};
+    if(o.url) $('subgoUrl').value=o.url;
+    if(o.savedUser) $('subgoUser').value=o.savedUser;
+    if(o.reachable){
+      $('subgoState').textContent='已检测到 SUBGO '+(o.version?'v'+o.version:'')+'（'+(o.url||'')+'），填账号密码后点一下即可。';
+    }else{
+      $('subgoState').textContent='未检测到 SUBGO'+(o.error?'：'+o.error:'')+'。可手动填地址（本机默认 http://127.0.0.1:8781）。';
+    }
+    if(o.hasSavedPassword){ $('subgoPass').placeholder='已保存密码，留空则使用已保存的'; }
+  }catch(e){
+    $('subgoState').textContent='SUBGO 检测失败：'+e.message;
   }
 }
 
@@ -992,7 +1027,7 @@ $('cfgApply').onclick=applyCfg;
 $('cycleRealityDest').onclick=cycleRealityTarget;
 $('genUuid').onclick=()=>ensureUuid(true);
 $('updatePanel').onclick=updatePanel;
-$('connectSub').onclick=connectSub;
+$('connectSubgo').onclick=()=>connectSubgo();
 $('chainEnabled').onchange=updateFieldVisibility;
 $('chainType').onchange=updateFieldVisibility;
 $('chainTest').onclick=testChainConnectivity;

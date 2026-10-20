@@ -44,6 +44,9 @@ apt_install_fast(){
 ensure_base_deps() {
   local missing=()
   command -v curl >/dev/null 2>&1 || missing+=(curl)
+  # unzip 缺失时 Xray 压缩包解不开，会静默跳过安装，
+  # 随后面板里"一键 Reality"就会因为 `xray x25519` 不存在报 exit status 127。
+  command -v unzip >/dev/null 2>&1 || missing+=(unzip)
   if (( ${#missing[@]} > 0 )); then
     if command -v apt-get >/dev/null 2>&1; then
       apt_install_fast "${missing[@]}"
@@ -58,6 +61,33 @@ ensure_base_deps() {
       return 1
     fi
   fi
+}
+
+# 解压 zip：优先 unzip，缺 unzip 时用 python3 兜底，避免 Xray 装不上。
+unzip_zip(){
+  local zip="$1" dest="$2"
+  if command -v unzip >/dev/null 2>&1; then
+    unzip -o "$zip" -d "$dest" >/dev/null && return 0
+  fi
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "$zip" "$dest" <<'PYZIP' >/dev/null 2>&1
+import sys, zipfile
+zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])
+PYZIP
+    return 0
+  fi
+  return 1
+}
+
+# 安装后自检：二进制必须存在且能执行，否则给出明确指引。
+xray_install_check(){
+  if command -v xray >/dev/null 2>&1 && xray version >/dev/null 2>&1; then
+    echo "Xray 就绪: $(xray version 2>/dev/null | head -n1)"
+    return 0
+  fi
+  echo "⚠️ Xray 未安装成功，面板一键 Reality/HY2 会失败。" >&2
+  echo "   可运行: apt-get install -y unzip && sui  -> 4/8 安装或修复 Xray" >&2
+  return 1
 }
 
 # 仅源码回退路径需要：git + go + C 编译器（sqlite 走 cgo）。
@@ -282,7 +312,7 @@ bootstrap_install_xray(){
     zip="$tmp/xray.zip"
     curl -fL --retry 3 -o "$zip" "https://github.com/XTLS/Xray-core/releases/download/$ver/Xray-linux-64.zip" || { echo "Xray 下载失败，跳过；可稍后运行 sui -> 安装/修复 Xray"; return 0; }
   fi
-  unzip -o "$zip" -d "$tmp" >/dev/null || { echo "Xray 解压失败，跳过；可稍后运行 sui -> 安装/修复 Xray"; return 0; }
+  unzip_zip "$zip" "$tmp" || { echo "Xray 解压失败（缺少 unzip 且无 python3）；可稍后运行 sui -> 安装/修复 Xray"; return 0; }
   install -m 0755 "$tmp/xray" /usr/local/bin/xray
   [[ -f "$tmp/geoip.dat" ]] && install -m 0644 "$tmp/geoip.dat" /usr/local/share/xray/geoip.dat || true
   [[ -f "$tmp/geosite.dat" ]] && install -m 0644 "$tmp/geosite.dat" /usr/local/share/xray/geosite.dat || true
@@ -620,7 +650,7 @@ install_xray_version(){
   trap 'rm -rf "${tmp:-}"; trap - RETURN' RETURN
   echo "正在安装 Xray $ver ..."
   curl -fL --retry 3 -o "$tmp/xray.zip" "https://github.com/XTLS/Xray-core/releases/download/$ver/Xray-linux-64.zip"
-  unzip -o "$tmp/xray.zip" -d "$tmp" >/dev/null
+  unzip_zip "$tmp/xray.zip" "$tmp"
   install -m 0755 "$tmp/xray" /usr/local/bin/xray
   [[ -f "$tmp/geoip.dat" ]] && install -m 0644 "$tmp/geoip.dat" /usr/local/share/xray/geoip.dat || true
   [[ -f "$tmp/geosite.dat" ]] && install -m 0644 "$tmp/geosite.dat" /usr/local/share/xray/geosite.dat || true
@@ -844,6 +874,7 @@ main() {
   write_service
   write_sui_cli
   bootstrap_install_xray
+  xray_install_check || echo "提示：稍后可在 sui 菜单里选 8) 安装/修复 Xray"
 
   systemctl daemon-reload
   systemctl enable sui-go >/dev/null 2>&1 || true

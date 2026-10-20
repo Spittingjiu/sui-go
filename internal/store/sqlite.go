@@ -152,6 +152,26 @@ func (s *SQLiteStore) UpdatePanelSetting(username, panelPath string) (model.Pane
 	return p, nil
 }
 
+func (s *SQLiteStore) SaveSubgoConfig(url, user, pass string) (model.PanelSettingDB, error) {
+	p, err := s.GetPanelSetting()
+	if err != nil {
+		return model.PanelSettingDB{}, err
+	}
+	if strings.TrimSpace(url) != "" {
+		p.SubgoURL = strings.TrimSpace(url)
+	}
+	if strings.TrimSpace(user) != "" {
+		p.SubgoUser = strings.TrimSpace(user)
+	}
+	if strings.TrimSpace(pass) != "" {
+		p.SubgoPass = pass
+	}
+	if err := s.db.Save(&p).Error; err != nil {
+		return model.PanelSettingDB{}, err
+	}
+	return p, nil
+}
+
 func (s *SQLiteStore) RotateAPIToken(token string) (model.PanelSettingDB, error) {
 	p, err := s.GetPanelSetting()
 	if err != nil {

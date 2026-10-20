@@ -65,10 +65,14 @@ type ForwardDB struct {
 }
 
 type PanelSettingDB struct {
-	ID        uint      `gorm:"primaryKey" json:"id"`
-	Username  string    `json:"username"`
-	PanelPath string    `json:"panelPath"`
-	APIToken  string    `json:"apiToken"`
+	ID        uint   `gorm:"primaryKey" json:"id"`
+	Username  string `json:"username"`
+	PanelPath string `json:"panelPath"`
+	APIToken  string `json:"apiToken"`
+	// SUBGO 一键对接配置，保存后下次点一下即可重新推送。
+	SubgoURL  string    `json:"subgoUrl"`
+	SubgoUser string    `json:"subgoUser"`
+	SubgoPass string    `json:"-"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }
