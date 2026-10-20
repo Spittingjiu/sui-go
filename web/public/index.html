@@ -208,7 +208,7 @@
           </div>
         </section>
 
-        <section id="sec-dashboard" class="hidden"><div class="section-grid"><div class="card"><div class="section-head"><div><h2>概览</h2><div class="note">系统统计和面板维护。</div></div><button id="updatePanel" class="ghost">更新面板</button></div><div class="stats"><div class="stat"><div class="k">Inbound 总数</div><div class="v" id="stTotalMirror">—</div></div><div class="stat"><div class="k">当前默认入口</div><div class="v" style="font-size:24px">节点</div></div></div></div><aside class="panel"><h3>一键对接 SUBGO</h3><div class="note" id="subgoState" style="margin:6px 0 10px">正在检测本机 SUBGO…</div><div class="field-grid"><input id="subgoUrl" class="span-12" placeholder="SUBGO 地址（本机默认 http://127.0.0.1:8781）" /><input id="subgoUser" class="span-12" placeholder="SUBGO 用户名" /><input id="subgoPass" class="span-12" placeholder="SUBGO 密码（保存后只需点一下）" type="password" /><input id="subgoSourceName" class="span-12" placeholder="源名称（默认 sui-go）" value="sui-go" /><button id="connectSubgo" class="span-12">一键推送到 SUBGO</button></div><div id="subgoOut" class="note" style="margin-top:10px;white-space:pre-wrap"></div></aside></div></section>
+        <section id="sec-dashboard" class="hidden"><div class="section-grid"><div class="card"><div class="section-head"><div><h2>概览</h2><div class="note">系统统计和面板维护。</div></div><button id="updatePanel" class="ghost">更新面板</button></div><div class="stats"><div class="stat"><div class="k">Inbound 总数</div><div class="v" id="stTotalMirror">—</div></div><div class="stat"><div class="k">当前默认入口</div><div class="v" style="font-size:24px">节点</div></div></div></div><aside class="panel"><h3>一键对接 SUBGO</h3><div class="note" id="subgoState" style="margin:6px 0 10px">正在检测本机 SUBGO…</div><div class="field-grid"><input id="subgoUrl" class="span-12" placeholder="SUBGO 地址（本机默认 http://127.0.0.1:8781）" /><input id="subgoUser" class="span-12" placeholder="SUBGO 用户名" /><input id="subgoPass" class="span-12" placeholder="SUBGO 密码（保存后只需点一下）" type="password" /><input id="subgoToken" class="span-12" placeholder="对接密钥 X-Sui-Bridge-Token（SUBGO 开白名单时必填）" /><input id="subgoSourceName" class="span-12" placeholder="源名称（默认 sui-go）" value="sui-go" /><button id="connectSubgo" class="span-12">一键推送到 SUBGO</button></div><div id="subgoOut" class="note" style="margin-top:10px;white-space:pre-wrap"></div></aside></div></section>
 
         <section id="sec-xray" class="card hidden"><div class="section-head"><div><h2>面板设置</h2><div class="note">账号、安全与 Xray 运行设置。</div></div></div><div class="panel" style="margin-bottom:14px;box-shadow:none"><div class="section-head" style="margin-bottom:8px"><div><h3>账号设置</h3><div class="note">修改登录用户名或密码。</div></div></div><div class="field-grid"><div class="form-field span-3"><label for="accountUsername">用户名</label><input id="accountUsername" placeholder="当前用户名" /></div><button id="saveUsername" class="span-2">保存用户名</button><div class="form-field span-3"><label for="oldPassword">旧密码</label><input id="oldPassword" type="password" autocomplete="current-password" placeholder="当前密码" /></div><div class="form-field span-3"><label for="newPassword">新密码</label><input id="newPassword" type="password" autocomplete="new-password" placeholder="至少 6 位" /></div><button id="savePassword" class="span-2">修改密码</button></div></div><div class="panel" style="margin-bottom:14px;box-shadow:none"><div class="section-head" style="margin-bottom:8px"><div><h3>Xray 更新</h3><div class="note">选择稳定版或开发版，检测后再决定是否更新。</div></div></div><div class="field-grid"><div class="form-field span-3"><label for="xrayChannel">更新通道</label><select id="xrayChannel"><option value="stable">稳定版</option><option value="dev">开发版</option></select></div><div class="xray-actions span-4"><button id="xrayVersionCheck" class="ghost">检测</button><button id="xrayUpdateSelected">更新到所选版本</button></div></div><div class="version-grid"><div class="version-box"><div class="k">当前版本</div><div class="v" id="xrayCurrentVersion">—</div></div><div class="version-box"><div class="k">稳定版最新</div><div class="v" id="xrayStableVersion">—</div></div><div class="version-box"><div class="k">开发版最新</div><div class="v" id="xrayDevVersion">—</div></div></div><div id="xrayVersionText" class="version-status">还没检测，点击“检测”。</div></div><div class="row"><button id="cfgShow" class="ghost">查看配置 JSON</button><button id="cfgExport" class="ghost">导出到文件</button><button id="cfgApply">导出并 Reload</button></div><pre id="cfgOut"></pre></section>
       </main>
@@ -846,6 +846,7 @@ async function connectSubgo(oneClick){
       url: ($('subgoUrl').value||'').trim(),
       username: ($('subgoUser').value||'').trim(),
       password: ($('subgoPass').value||''),
+      bridgeToken: ($('subgoToken').value||'').trim(),
       name: ($('subgoSourceName').value||'').trim() || 'sui-go',
     };
     const j=await api('/api/panel/subgo',{method:'POST',body:JSON.stringify(body)});
@@ -872,7 +873,8 @@ function openSubgoLink(){
 
 async function refreshSubgo(){
   try{
-    const j=await api('/api/panel/subgo');
+    const tk=($('subgoToken')?.value||'').trim();
+    const j=await api('/api/panel/subgo'+(tk?('?token='+encodeURIComponent(tk)):''));
     const o=j.obj||{};
     if(o.url) $('subgoUrl').value=o.url;
     if(o.savedUser) $('subgoUser').value=o.savedUser;
@@ -882,6 +884,7 @@ async function refreshSubgo(){
       $('subgoState').textContent='未检测到 SUBGO'+(o.error?'：'+o.error:'')+'。可手动填地址（本机默认 http://127.0.0.1:8781）。';
     }
     if(o.hasSavedPassword){ $('subgoPass').placeholder='已保存密码，留空则使用已保存的'; }
+    if(o.hasBridgeToken && $('subgoToken')){ $('subgoToken').placeholder='已保存对接密钥，留空则使用已保存的'; }
   }catch(e){
     $('subgoState').textContent='SUBGO 检测失败：'+e.message;
   }

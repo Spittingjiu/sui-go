@@ -70,9 +70,12 @@ type PanelSettingDB struct {
 	PanelPath string `json:"panelPath"`
 	APIToken  string `json:"apiToken"`
 	// SUBGO 一键对接配置，保存后下次点一下即可重新推送。
-	SubgoURL  string    `json:"subgoUrl"`
-	SubgoUser string    `json:"subgoUser"`
-	SubgoPass string    `json:"-"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	SubgoURL  string `json:"subgoUrl"`
+	SubgoUser string `json:"subgoUser"`
+	SubgoPass string `json:"-"`
+	// SUBGO 开了 IP 白名单时，用它做 X-Sui-Bridge-Token 放行。
+	SubgoBridgeToken string    `json:"subgoBridgeToken"`
+	SubgoHasToken    bool      `json:"-" gorm:"-"`
+	CreatedAt        time.Time `json:"createdAt"`
+	UpdatedAt        time.Time `json:"updatedAt"`
 }

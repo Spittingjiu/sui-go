@@ -152,7 +152,7 @@ func (s *SQLiteStore) UpdatePanelSetting(username, panelPath string) (model.Pane
 	return p, nil
 }
 
-func (s *SQLiteStore) SaveSubgoConfig(url, user, pass string) (model.PanelSettingDB, error) {
+func (s *SQLiteStore) SaveSubgoConfig(url, user, pass, bridgeToken string) (model.PanelSettingDB, error) {
 	p, err := s.GetPanelSetting()
 	if err != nil {
 		return model.PanelSettingDB{}, err
@@ -165,6 +165,9 @@ func (s *SQLiteStore) SaveSubgoConfig(url, user, pass string) (model.PanelSettin
 	}
 	if strings.TrimSpace(pass) != "" {
 		p.SubgoPass = pass
+	}
+	if strings.TrimSpace(bridgeToken) != "" {
+		p.SubgoBridgeToken = strings.TrimSpace(bridgeToken)
 	}
 	if err := s.db.Save(&p).Error; err != nil {
 		return model.PanelSettingDB{}, err

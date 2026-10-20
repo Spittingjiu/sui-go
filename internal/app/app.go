@@ -3197,6 +3197,8 @@ func (a *App) handlePanelConnectSub(w http.ResponseWriter, r *http.Request) {
 	})
 	bridgeReq, _ := http.NewRequest(http.MethodPost, base+"/api/bridge/push-source", bytes.NewReader(bridgeBody))
 	bridgeReq.Header.Set("content-type", "application/json")
+	// SUBGO 开了 IP 白名单时靠这个头放行。
+	applyBridgeToken(bridgeReq, p.SubgoBridgeToken)
 	bridgeResp, err := client.Do(bridgeReq)
 	if err != nil {
 		a.writeErr(w, http.StatusBadGateway, "连接 sui-sub 失败: "+err.Error())

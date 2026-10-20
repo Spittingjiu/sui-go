@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 )
@@ -17,24 +18,27 @@ import (
 const defaultSubgoURL = "http://127.0.0.1:8781"
 
 type subgoProbe struct {
-	Reachable  bool   `json:"reachable"`
-	URL        string `json:"url"`
-	Version    string `json:"version"`
-	Error      string `json:"error,omitempty"`
-	SavedURL   string `json:"savedUrl,omitempty"`
-	SavedUser  string `json:"savedUser,omitempty"`
-	HasSaved   bool   `json:"hasSavedPassword"`
-	SuggestURL bool   `json:"suggestUrl"`
+	Reachable      bool   `json:"reachable"`
+	URL            string `json:"url"`
+	Version        string `json:"version"`
+	Error          string `json:"error,omitempty"`
+	SavedURL       string `json:"savedUrl,omitempty"`
+	SavedUser      string `json:"savedUser,omitempty"`
+	HasSaved       bool   `json:"hasSavedPassword"`
+	HasBridgeToken bool   `json:"hasBridgeToken"`
+	SuggestURL     bool   `json:"suggestUrl"`
 }
 
-func probeSubgo(base string) subgoProbe {
+func probeSubgo(base, bridgeToken string) subgoProbe {
 	base = strings.TrimRight(strings.TrimSpace(base), "/")
 	res := subgoProbe{URL: base}
 	if base == "" {
 		return res
 	}
-	client := &http.Client{Timeout: 4 * time.Second}
-	resp, err := client.Get(base + "/api/version")
+	client := &http.Client{Timeout: 6 * time.Second}
+	req, _ := http.NewRequest(http.MethodGet, base+"/api/version", nil)
+	applyBridgeToken(req, bridgeToken)
+	resp, err := client.Do(req)
 	if err != nil {
 		res.Error = err.Error()
 		return res
@@ -51,8 +55,24 @@ func probeSubgo(base string) subgoProbe {
 		res.Version = body.Version
 		return res
 	}
+	if resp.StatusCode == http.StatusForbidden {
+		res.Error = "403 被 SUBGO 白名单拦截（需要在面板里填对接密钥 X-Sui-Bridge-Token）"
+		return res
+	}
 	res.Error = fmt.Sprintf("HTTP %d", resp.StatusCode)
 	return res
+}
+
+// applyBridgeToken 给请求带上对接密钥。SUBGO 开了 IP 白名单时，
+// nginx 只放行带正确 X-Sui-Bridge-Token 的 bridge/version 请求。
+func applyBridgeToken(req *http.Request, token string) {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		token = strings.TrimSpace(os.Getenv("SUBGO_BRIDGE_TOKEN"))
+	}
+	if token != "" {
+		req.Header.Set("X-Sui-Bridge-Token", token)
+	}
 }
 
 // normalizeSubgoURL 允许用户只填 127.0.0.1:8781 或 localhost:8781。
@@ -83,6 +103,8 @@ func (a *App) handlePanelSubgo(w http.ResponseWriter, r *http.Request) {
 	p, _ := a.store.GetPanelSetting()
 	switch r.Method {
 	case http.MethodGet:
+		// 允许用 ?token= 现场试一个密钥（未保存时也能探测）。
+		bridgeToken := firstNonEmpty(strings.TrimSpace(r.URL.Query().Get("token")), p.SubgoBridgeToken)
 		candidates := []string{}
 		if strings.TrimSpace(p.SubgoURL) != "" {
 			candidates = append(candidates, strings.TrimSpace(p.SubgoURL))
@@ -95,7 +117,7 @@ func (a *App) handlePanelSubgo(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			seen[c] = true
-			pr := probeSubgo(c)
+			pr := probeSubgo(c, bridgeToken)
 			if pr.Reachable {
 				best = pr
 				break
@@ -107,15 +129,17 @@ func (a *App) handlePanelSubgo(w http.ResponseWriter, r *http.Request) {
 		best.SavedURL = strings.TrimSpace(p.SubgoURL)
 		best.SavedUser = strings.TrimSpace(p.SubgoUser)
 		best.HasSaved = strings.TrimSpace(p.SubgoPass) != ""
+		best.HasBridgeToken = strings.TrimSpace(p.SubgoBridgeToken) != ""
 		best.SuggestURL = best.URL == ""
 		a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": best})
 	case http.MethodPost:
 		var req struct {
-			URL      string `json:"url"`
-			Username string `json:"username"`
-			Password string `json:"password"`
-			Name     string `json:"name"`
-			PanelURL string `json:"panelUrl"`
+			URL         string `json:"url"`
+			Username    string `json:"username"`
+			Password    string `json:"password"`
+			Name        string `json:"name"`
+			PanelURL    string `json:"panelUrl"`
+			BridgeToken string `json:"bridgeToken"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			a.writeErr(w, http.StatusBadRequest, "invalid json")
@@ -138,7 +162,8 @@ func (a *App) handlePanelSubgo(w http.ResponseWriter, r *http.Request) {
 			a.writeErr(w, http.StatusBadRequest, "SUBGO 用户名和密码必填（首次对接后会自动记住）")
 			return
 		}
-		probe := probeSubgo(base)
+		bridgeToken := firstNonEmpty(strings.TrimSpace(req.BridgeToken), p.SubgoBridgeToken)
+		probe := probeSubgo(base, bridgeToken)
 		if !probe.Reachable {
 			a.writeErr(w, http.StatusBadGateway, "连不上 SUBGO ("+base+"): "+probe.Error)
 			return
@@ -173,6 +198,7 @@ func (a *App) handlePanelSubgo(w http.ResponseWriter, r *http.Request) {
 		client := &http.Client{Timeout: 12 * time.Second}
 		bridgeReq, _ := http.NewRequest(http.MethodPost, base+"/api/bridge/push-source", bytes.NewReader(body))
 		bridgeReq.Header.Set("content-type", "application/json")
+		applyBridgeToken(bridgeReq, bridgeToken)
 		resp, err := client.Do(bridgeReq)
 		if err != nil {
 			a.writeErr(w, http.StatusBadGateway, "连接 SUBGO 失败: "+err.Error())
@@ -189,7 +215,7 @@ func (a *App) handlePanelSubgo(w http.ResponseWriter, r *http.Request) {
 			a.writeErr(w, http.StatusBadRequest, msg)
 			return
 		}
-		_, _ = a.store.SaveSubgoConfig(base, user, pass)
+		_, _ = a.store.SaveSubgoConfig(base, user, pass, bridgeToken)
 		a.writeJSON(w, http.StatusOK, map[string]any{
 			"success": true,
 			"msg":     "已推送到 SUBGO",
@@ -204,6 +230,15 @@ func (a *App) handlePanelSubgo(w http.ResponseWriter, r *http.Request) {
 	default:
 		a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
 }
 
 func candidateDefault(saved string) string {
