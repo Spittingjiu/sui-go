@@ -106,6 +106,12 @@ func (a *App) handlePanelSubgo(w http.ResponseWriter, r *http.Request) {
 		// 允许用 ?token= 现场试一个密钥（未保存时也能探测）。
 		bridgeToken := firstNonEmpty(strings.TrimSpace(r.URL.Query().Get("token")), p.SubgoBridgeToken)
 		candidates := []string{}
+		// 支持 ?url= 现场试地址（还没保存时也能探测公网/远端 SUBGO）。
+		if u := strings.TrimSpace(r.URL.Query().Get("url")); u != "" {
+			if norm, err := normalizeSubgoURL(u); err == nil {
+				candidates = append(candidates, norm)
+			}
+		}
 		if strings.TrimSpace(p.SubgoURL) != "" {
 			candidates = append(candidates, strings.TrimSpace(p.SubgoURL))
 		}

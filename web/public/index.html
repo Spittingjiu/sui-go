@@ -874,7 +874,11 @@ function openSubgoLink(){
 async function refreshSubgo(){
   try{
     const tk=($('subgoToken')?.value||'').trim();
-    const j=await api('/api/panel/subgo'+(tk?('?token='+encodeURIComponent(tk)):''));
+    const u=($('subgoUrl').value||'').trim();
+    const qs=[];
+    if(tk) qs.push('token='+encodeURIComponent(tk));
+    if(u) qs.push('url='+encodeURIComponent(u));
+    const j=await api('/api/panel/subgo'+(qs.length?('?'+qs.join('&')):''));
     const o=j.obj||{};
     if(o.url) $('subgoUrl').value=o.url;
     if(o.savedUser) $('subgoUser').value=o.savedUser;
