@@ -216,7 +216,12 @@ func (a *App) handlePanelSubgo(w http.ResponseWriter, r *http.Request) {
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 || reply["ok"] != true {
 			msg := fmt.Sprintf("SUBGO 对接失败 HTTP %d", resp.StatusCode)
 			if em, ok := reply["error"].(string); ok && strings.TrimSpace(em) != "" {
-				msg = "SUBGO 对接失败: " + em
+				if strings.Contains(strings.ToLower(em), "invalid credentials") ||
+					strings.Contains(strings.ToLower(em), "invalid username or password") {
+					msg = fmt.Sprintf("SUBGO 拒绝账号密码。这里要填 SUBGO 后台账号（默认用户名 admin），不是本面板账号。当前填的用户名是 %q，请确认密码也是 SUBGO 的。", user)
+				} else {
+					msg = "SUBGO 对接失败: " + em
+				}
 			}
 			a.writeErr(w, http.StatusBadRequest, msg)
 			return
@@ -262,4 +267,62 @@ func localPortOpen(addr string) bool {
 	}
 	_ = conn.Close()
 	return true
+}
+
+// handlePanelSubgoVerify 只验证 SUBGO 账号密码，不推送。
+// 用来把"账号错"和"密码错"与网络/白名单问题区分开。
+func (a *App) handlePanelSubgoVerify(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !a.checkAuth(r) {
+		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	p, _ := a.store.GetPanelSetting()
+	var req struct {
+		URL         string `json:"url"`
+		Username    string `json:"username"`
+		Password    string `json:"password"`
+		BridgeToken string `json:"bridgeToken"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		a.writeErr(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	base, err := normalizeSubgoURL(firstNonEmpty(req.URL, p.SubgoURL))
+	if err != nil {
+		a.writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	user := firstNonEmpty(req.Username, p.SubgoUser)
+	pass := firstNonEmpty(req.Password, p.SubgoPass)
+	token := firstNonEmpty(req.BridgeToken, p.SubgoBridgeToken)
+	if user == "" || pass == "" {
+		a.writeErr(w, http.StatusBadRequest, "请先填 SUBGO 用户名和密码")
+		return
+	}
+	body, _ := json.Marshal(map[string]string{"username": user, "password": pass})
+	client := &http.Client{Timeout: 12 * time.Second}
+	vreq, _ := http.NewRequest(http.MethodPost, base+"/api/auth/login", bytes.NewReader(body))
+	vreq.Header.Set("content-type", "application/json")
+	applyBridgeToken(vreq, token)
+	resp, err := client.Do(vreq)
+	if err != nil {
+		a.writeErr(w, http.StatusBadGateway, "连不上 SUBGO ("+base+"): "+err.Error())
+		return
+	}
+	defer resp.Body.Close()
+	var reply map[string]any
+	_ = json.NewDecoder(resp.Body).Decode(&reply)
+	if resp.StatusCode == http.StatusForbidden {
+		a.writeErr(w, http.StatusForbidden, "被 SUBGO 白名单拦截：需要正确的对接密钥 X-Sui-Bridge-Token")
+		return
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 || reply["ok"] == false {
+		a.writeErr(w, http.StatusUnauthorized, fmt.Sprintf("账号或密码不对（用户名 %q）。SUBGO 后台用户名默认是 admin；这里不是本面板账号。", user))
+		return
+	}
+	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "msg": "SUBGO 账号验证通过"})
 }

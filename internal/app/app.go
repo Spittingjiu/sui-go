@@ -118,6 +118,7 @@ func (a *App) routes() {
 	a.mux.HandleFunc("/api/panel/change-username", a.handlePanelChangeUsername)
 	a.mux.HandleFunc("/api/panel/connect-sub", a.handlePanelConnectSub)
 	a.mux.HandleFunc("/api/panel/subgo", a.handlePanelSubgo)
+	a.mux.HandleFunc("/api/panel/subgo/verify", a.handlePanelSubgoVerify)
 
 	a.mux.HandleFunc("/api/system/status", a.handleSystemStatus)
 	a.mux.HandleFunc("/api/system/restart-panel", a.handleSystemRestartPanel)
