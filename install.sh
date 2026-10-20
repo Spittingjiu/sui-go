@@ -846,7 +846,9 @@ main() {
   bootstrap_install_xray
 
   systemctl daemon-reload
-  systemctl enable --now sui-go
+  systemctl enable sui-go >/dev/null 2>&1 || true
+  # 重装/升级必须 restart，否则服务仍在跑旧二进制（start 对运行中服务无效果）
+  systemctl restart sui-go
   sleep 2
   systemctl status sui-go --no-pager -n 30 || true
   if ! systemctl is-active --quiet sui-go; then
