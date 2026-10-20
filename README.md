@@ -319,7 +319,7 @@ sui-go/
 ├── internal/app/        # HTTP API 与业务逻辑
 ├── internal/model/      # 数据模型
 ├── internal/store/      # SQLite 存储层
-├── public/              # 内置 Web UI
+├── web/public/          # 内置 Web UI（go:embed 打进二进制）
 ├── scripts/             # 测试与辅助脚本
 ├── docs/                # 性能、协议矩阵等文档
 ├── install.sh           # 一键安装脚本

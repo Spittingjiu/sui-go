@@ -26,6 +26,7 @@ import (
 
 	"github.com/Spittingjiu/sui-go/internal/model"
 	"github.com/Spittingjiu/sui-go/internal/store"
+	"github.com/Spittingjiu/sui-go/web"
 	"github.com/google/uuid"
 )
 
@@ -135,8 +136,8 @@ func (a *App) routes() {
 
 	a.mux.HandleFunc("/api/view/bootstrap", a.handleViewBootstrap)
 
-	// minimal web ui
-	a.mux.Handle("/", http.FileServer(http.Dir("public")))
+	// web ui (embedded in the binary so single-file installs work)
+	a.mux.Handle("/", http.FileServer(http.FS(web.Public())))
 }
 
 func (a *App) handleHealth(w http.ResponseWriter, r *http.Request) {
