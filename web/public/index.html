@@ -546,10 +546,11 @@ function applyPreset(kind){
   }else if(kind==='vless-reality'){
     $('proto').value='vless';
     $('remark').value='vless-reality-quick';
-    $('net').value='xhttp';
+    // Reality + XTLS Vision 只对 TCP 有效；用 xhttp 会导致客户端握手失败。
+    $('net').value='tcp';
     $('sec').value='reality';
     applyRealityTarget(realityTargetPool[0]);
-    $('path').value='/';
+    $('path').value='';
   }
   updateFieldVisibility();
   $('addOut').textContent='已应用快速模板，可直接创建';
@@ -616,8 +617,9 @@ async function quickCreate(kind){
     const obj=j.obj||{};
     await loadList();
     switchSection('sec-list');
-    setStatus(label+' 已创建');
-    $('linkOut').textContent=label+' 已创建：'+(obj.remark||'')+'  端口 '+(obj.port||$('port').value)+'\n可直接点该行“复制”或“二维码”。';
+    const applied=j.applied!==false;
+    setStatus(label+(applied?' 已创建并已生效':' 已创建，但应用失败'), applied);
+    $('linkOut').textContent=label+' 已创建：'+(obj.remark||'')+'  端口 '+(obj.port||$('port').value)+'\n'+(applied?'已写入 Xray 并重载，可直接用该行“复制”或“二维码”。':'⚠️ 写入 Xray 失败：'+(j.applyError||'未知错误')+'，请在 Xray 页点“应用”。');
   }catch(e){
     // 一键就是点一下完成：失败也只在状态栏/输出区提示，
     // 不再自动弹出表单让用户手动选参数。

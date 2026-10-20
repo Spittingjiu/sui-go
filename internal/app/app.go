@@ -533,7 +533,8 @@ func (a *App) handleAddInboundsBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.invalidateXrayConfigCache()
-	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "count": len(created), "obj": created})
+	applyErr := a.applyXrayConfig()
+	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "count": len(created), "obj": created, "applied": applyErr == nil, "applyError": errString(applyErr)})
 }
 
 func (a *App) handleAddInbound(w http.ResponseWriter, r *http.Request) {
@@ -578,7 +579,9 @@ func (a *App) handleAddInbound(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.invalidateXrayConfigCache()
-	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": created})
+	// 一键创建后立刻落盘并重载 Xray，否则节点只是数据库里的一条记录，端口不会监听。
+	applyErr := a.applyXrayConfig()
+	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": created, "applied": applyErr == nil, "applyError": errString(applyErr)})
 }
 
 func (a *App) handleInboundSub(w http.ResponseWriter, r *http.Request) {
@@ -660,7 +663,8 @@ func (a *App) handleInboundSub(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			a.invalidateXrayConfigCache()
-			a.writeJSON(w, http.StatusOK, map[string]any{"success": true})
+			applyErr := a.applyXrayConfig()
+			a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "applied": applyErr == nil, "applyError": errString(applyErr)})
 		default:
 			a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
 		}
@@ -885,7 +889,11 @@ func (a *App) normalizeAddInboundRequest(req model.AddInboundRequest) (model.Add
 		if strings.TrimSpace(req.Host) == "" {
 			req.Host = req.SNI
 		}
-		if strings.TrimSpace(req.Flow) == "" {
+		net := strings.ToLower(strings.TrimSpace(req.Network))
+		if net != "tcp" && net != "raw" {
+			// XTLS Vision 只对 RAW/TCP 有效；xhttp/ws/grpc 带 flow 会让客户端握手失败。
+			req.Flow = ""
+		} else if strings.TrimSpace(req.Flow) == "" {
 			req.Flow = "xtls-rprx-vision"
 		}
 	}
@@ -2835,7 +2843,9 @@ func (a *App) handleBatchToggleInbounds(w http.ResponseWriter, r *http.Request) 
 			changed++
 		}
 	}
-	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "changed": changed})
+	a.invalidateXrayConfigCache()
+	applyErr := a.applyXrayConfig()
+	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "changed": changed, "applied": applyErr == nil, "applyError": errString(applyErr)})
 }
 
 func (a *App) handleForwards(w http.ResponseWriter, r *http.Request) {
@@ -3335,7 +3345,7 @@ func (a *App) handleAddRealityQuick(w http.ResponseWriter, r *http.Request) {
 		Port:        req.Port,
 		Protocol:    "vless",
 		UUID:        u,
-		Network:     "xhttp",
+		Network:     "tcp",
 		Security:    "reality",
 		SNI:         emptyDefault(req.SNI, "www.icloud.com"),
 		Host:        emptyDefault(req.SNI, "www.icloud.com"),
@@ -3362,7 +3372,8 @@ func (a *App) handleAddRealityQuick(w http.ResponseWriter, r *http.Request) {
 		a.writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": obj})
+	applyErr := a.applyXrayConfig()
+	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": obj, "applied": applyErr == nil, "applyError": errString(applyErr)})
 }
 
 func (a *App) runBestEffort(cmdStr string) (string, error) {
