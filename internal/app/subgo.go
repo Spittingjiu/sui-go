@@ -216,6 +216,28 @@ func (a *App) handlePanelSubgo(w http.ResponseWriter, r *http.Request) {
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 || reply["ok"] != true {
 			msg := fmt.Sprintf("SUBGO 对接失败 HTTP %d", resp.StatusCode)
 			if em, ok := reply["error"].(string); ok && strings.TrimSpace(em) != "" {
+				// 密码首尾带空格时 SUBGO 会判失败，这里重试一次去空格版本。
+				if strings.Contains(strings.ToLower(em), "invalid") {
+					if trimmed := strings.TrimSpace(pass); trimmed != pass && trimmed != "" {
+						body2, _ := json.Marshal(map[string]string{
+							"username": user, "password": trimmed, "name": name,
+							"panel_url": panelBase, "panel_token": panelToken,
+						})
+						req2, _ := http.NewRequest(http.MethodPost, base+"/api/bridge/push-source", bytes.NewReader(body2))
+						req2.Header.Set("content-type", "application/json")
+						applyBridgeToken(req2, bridgeToken)
+						if resp2, err2 := client.Do(req2); err2 == nil {
+							defer resp2.Body.Close()
+							var reply2 map[string]any
+							_ = json.NewDecoder(resp2.Body).Decode(&reply2)
+							if resp2.StatusCode >= 200 && resp2.StatusCode < 300 && reply2["ok"] == true {
+								_, _ = a.store.SaveSubgoConfig(base, user, trimmed, bridgeToken)
+								a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "msg": "已推送到 SUBGO（密码首尾空格已自动去掉）"})
+								return
+							}
+						}
+					}
+				}
 				if strings.Contains(strings.ToLower(em), "invalid credentials") ||
 					strings.Contains(strings.ToLower(em), "invalid username or password") {
 					msg = fmt.Sprintf("SUBGO 拒绝账号密码。这里要填 SUBGO 后台账号（默认用户名 admin），不是本面板账号。当前填的用户名是 %q，请确认密码也是 SUBGO 的。", user)
@@ -303,26 +325,51 @@ func (a *App) handlePanelSubgoVerify(w http.ResponseWriter, r *http.Request) {
 		a.writeErr(w, http.StatusBadRequest, "请先填 SUBGO 用户名和密码")
 		return
 	}
-	body, _ := json.Marshal(map[string]string{"username": user, "password": pass})
-	client := &http.Client{Timeout: 12 * time.Second}
-	vreq, _ := http.NewRequest(http.MethodPost, base+"/api/auth/login", bytes.NewReader(body))
-	vreq.Header.Set("content-type", "application/json")
-	applyBridgeToken(vreq, token)
-	resp, err := client.Do(vreq)
+	ok, note := subgoLogin(base, user, pass, token)
+	if !ok {
+		a.writeErr(w, http.StatusUnauthorized, note)
+		return
+	}
+	msg := "SUBGO 账号验证通过"
+	if note != "" {
+		msg += "（" + note + "）"
+	}
+	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "msg": msg})
+}
+
+// subgoLogin 调 SUBGO 的 /api/auth/login。返回 (ok, 说明)。
+// 顺手兜住"从别处复制密码带空格"的常见坑：原文失败时再试一次去空格版本。
+func subgoLogin(base, user, pass, token string) (bool, string) {
+	attempt := func(pw string) (int, map[string]any, error) {
+		body, _ := json.Marshal(map[string]string{"username": user, "password": pw})
+		client := &http.Client{Timeout: 12 * time.Second}
+		req, _ := http.NewRequest(http.MethodPost, base+"/api/auth/login", bytes.NewReader(body))
+		req.Header.Set("content-type", "application/json")
+		applyBridgeToken(req, token)
+		resp, err := client.Do(req)
+		if err != nil {
+			return 0, nil, err
+		}
+		defer resp.Body.Close()
+		var reply map[string]any
+		_ = json.NewDecoder(resp.Body).Decode(&reply)
+		return resp.StatusCode, reply, nil
+	}
+	code, _, err := attempt(pass)
 	if err != nil {
-		a.writeErr(w, http.StatusBadGateway, "连不上 SUBGO ("+base+"): "+err.Error())
-		return
+		return false, "连不上 SUBGO: " + err.Error()
 	}
-	defer resp.Body.Close()
-	var reply map[string]any
-	_ = json.NewDecoder(resp.Body).Decode(&reply)
-	if resp.StatusCode == http.StatusForbidden {
-		a.writeErr(w, http.StatusForbidden, "被 SUBGO 白名单拦截：需要正确的对接密钥 X-Sui-Bridge-Token")
-		return
+	if code == http.StatusForbidden {
+		return false, "被 SUBGO 白名单拦截：需要正确的对接密钥 X-Sui-Bridge-Token"
 	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 || reply["ok"] == false {
-		a.writeErr(w, http.StatusUnauthorized, fmt.Sprintf("账号或密码不对（用户名 %q）。SUBGO 后台用户名默认是 admin；这里不是本面板账号。", user))
-		return
+	if code >= 200 && code < 300 {
+		return true, ""
 	}
-	a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "msg": "SUBGO 账号验证通过"})
+	if trimmed := strings.TrimSpace(pass); trimmed != pass && trimmed != "" {
+		code2, _, err2 := attempt(trimmed)
+		if err2 == nil && code2 >= 200 && code2 < 300 {
+			return true, "密码首尾有空格，已自动去掉"
+		}
+	}
+	return false, fmt.Sprintf("账号或密码不对（用户名 %q）。SUBGO 后台用户名默认是 admin；这里不是本面板账号。", user)
 }
