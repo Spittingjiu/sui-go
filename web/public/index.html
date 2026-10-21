@@ -210,7 +210,7 @@
 
         <section id="sec-dashboard" class="hidden"><div class="section-grid"><div class="card"><div class="section-head"><div><h2>概览</h2><div class="note">系统统计和面板维护。</div></div><button id="updatePanel" class="ghost">更新面板</button></div><div class="stats"><div class="stat"><div class="k">Inbound 总数</div><div class="v" id="stTotalMirror">—</div></div><div class="stat"><div class="k">当前默认入口</div><div class="v" style="font-size:24px">节点</div></div></div></div><aside class="panel"><h3>一键对接 SUBGO</h3><div class="note" id="subgoState" style="margin:6px 0 10px">正在检测本机 SUBGO…</div><div class="field-grid"><input id="subgoUrl" class="span-12" placeholder="SUBGO 地址（本机默认 http://127.0.0.1:8781）" /><input id="subgoUser" class="span-12" autocomplete="off" placeholder="SUBGO 后台用户名（默认 admin，不是本面板账号）" /><input id="subgoPass" class="span-12" autocomplete="new-password" placeholder="SUBGO 后台密码（不是本面板密码）" type="password" /><input id="subgoToken" class="span-12" autocomplete="off" placeholder="对接密钥 X-Sui-Bridge-Token（SUBGO 开白名单时必填）" /><input id="subgoSourceName" class="span-12" placeholder="源名称（默认 sui-go）" value="sui-go" /><button id="verifySubgo" class="ghost span-12">先验证 SUBGO 账号</button><button id="connectSubgo" class="span-12">一键推送到 SUBGO</button></div><div id="subgoOut" class="note" style="margin-top:10px;white-space:pre-wrap"></div></aside></div></section>
 
-        <section id="sec-xray" class="card hidden"><div class="section-head"><div><h2>面板设置</h2><div class="note">账号、安全与 Xray 运行设置。</div></div></div><div class="panel" style="margin-bottom:14px;box-shadow:none"><div class="section-head" style="margin-bottom:8px"><div><h3>账号设置</h3><div class="note">修改登录用户名或密码。</div></div></div><div class="field-grid"><div class="form-field span-3"><label for="accountUsername">用户名</label><input id="accountUsername" placeholder="当前用户名" /></div><button id="saveUsername" class="span-2">保存用户名</button><div class="form-field span-3"><label for="oldPassword">旧密码</label><input id="oldPassword" type="password" autocomplete="current-password" placeholder="当前密码" /></div><div class="form-field span-3"><label for="newPassword">新密码</label><input id="newPassword" type="password" autocomplete="new-password" placeholder="至少 6 位" /></div><button id="savePassword" class="span-2">修改密码</button></div></div><div class="panel" style="margin-bottom:14px;box-shadow:none"><div class="section-head" style="margin-bottom:8px"><div><h3>Xray 更新</h3><div class="note">选择稳定版或开发版，检测后再决定是否更新。</div></div></div><div class="field-grid"><div class="form-field span-3"><label for="xrayChannel">更新通道</label><select id="xrayChannel"><option value="stable">稳定版</option><option value="dev">开发版</option></select></div><div class="xray-actions span-4"><button id="xrayVersionCheck" class="ghost">检测</button><button id="xrayUpdateSelected">更新到所选版本</button></div></div><div class="version-grid"><div class="version-box"><div class="k">当前版本</div><div class="v" id="xrayCurrentVersion">—</div></div><div class="version-box"><div class="k">稳定版最新</div><div class="v" id="xrayStableVersion">—</div></div><div class="version-box"><div class="k">开发版最新</div><div class="v" id="xrayDevVersion">—</div></div></div><div id="xrayVersionText" class="version-status">还没检测，点击“检测”。</div></div><div class="row"><button id="cfgShow" class="ghost">查看配置 JSON</button><button id="cfgExport" class="ghost">导出到文件</button><button id="cfgApply">导出并 Reload</button></div><pre id="cfgOut"></pre></section>
+        <section id="sec-xray" class="card hidden"><div class="section-head"><div><h2>面板设置</h2><div class="note">账号、安全与 Xray 运行设置。</div></div></div><div class="panel" style="margin-bottom:14px;box-shadow:none"><div class="section-head" style="margin-bottom:8px"><div><h3>账号设置</h3><div class="note">修改登录用户名或密码。</div></div></div><div class="field-grid"><div class="form-field span-3"><label for="accountUsername">用户名</label><input id="accountUsername" placeholder="当前用户名" /></div><button id="saveUsername" class="span-2">保存用户名</button><div class="form-field span-3"><label for="oldPassword">旧密码</label><input id="oldPassword" type="password" autocomplete="current-password" placeholder="当前密码" /></div><div class="form-field span-3"><label for="newPassword">新密码</label><input id="newPassword" type="password" autocomplete="new-password" placeholder="至少 6 位" /></div><button id="savePassword" class="span-2">修改密码</button></div></div><div class="panel" style="margin-bottom:14px;box-shadow:none"><div class="section-head" style="margin-bottom:8px"><div><h3>IPv6 设置</h3><div class="note">自由切换节点 IPv6 开关。关闭时强制仅 IPv4 出网，防止访问 ip.sb 等网站泄露 IPv6 地址。</div></div></div><div class="field-grid"><div class="form-field span-4"><label for="ipv6Switch">IPv6 开关状态</label><select id="ipv6Switch"><option value="0">关闭 IPv6（纯 IPv4 优先，防止 IPv6 泄露）</option><option value="1">开启 IPv6（支持 IPv4 + IPv6 双栈出网）</option></select></div><div class="xray-actions span-2" style="display:flex;align-items:flex-end"><button id="saveIPv6">保存并应用</button></div></div><div id="ipv6StatusText" class="version-status" style="margin-top:8px"></div></div><div class="panel" style="margin-bottom:14px;box-shadow:none"><div class="section-head" style="margin-bottom:8px"><div><h3>Xray 更新</h3><div class="note">选择稳定版或开发版，检测后再决定是否更新。</div></div></div><div class="field-grid"><div class="form-field span-3"><label for="xrayChannel">更新通道</label><select id="xrayChannel"><option value="stable">稳定版</option><option value="dev">开发版</option></select></div><div class="xray-actions span-4"><button id="xrayVersionCheck" class="ghost">检测</button><button id="xrayUpdateSelected">更新到所选版本</button></div></div><div class="version-grid"><div class="version-box"><div class="k">当前版本</div><div class="v" id="xrayCurrentVersion">—</div></div><div class="version-box"><div class="k">稳定版最新</div><div class="v" id="xrayStableVersion">—</div></div><div class="version-box"><div class="k">开发版最新</div><div class="v" id="xrayDevVersion">—</div></div></div><div id="xrayVersionText" class="version-status">还没检测，点击“检测”。</div></div><div class="row"><button id="cfgShow" class="ghost">查看配置 JSON</button><button id="cfgExport" class="ghost">导出到文件</button><button id="cfgApply">导出并 Reload</button></div><pre id="cfgOut"></pre></section>
       </main>
     </div>
   </div>
@@ -923,6 +923,8 @@ async function loadPanelAccount(){
     const j=await api('/api/panel/settings');
     const o=j.obj||{};
     if($('accountUsername')) $('accountUsername').value=o.username||'';
+    if($('ipv6Switch')) $('ipv6Switch').value = o.ipv6Enabled ? '1' : '0';
+    if($('ipv6StatusText')) $('ipv6StatusText').textContent = o.ipv6Enabled ? '当前状态：IPv6 已开启（双栈出网）' : '当前状态：IPv6 已关闭（纯 IPv4 出网）';
   }catch(e){
     $('cfgOut').textContent='读取账号设置失败: '+e.message;
   }
@@ -1044,11 +1046,29 @@ async function updatePanel(){
   }
 }
 
+
+async function saveIPv6Setting(){
+  try{
+    const enabled = $('ipv6Switch').value === '1';
+    $('saveIPv6').disabled = true;
+    if($('ipv6StatusText')) $('ipv6StatusText').textContent = '正在保存并应用 Xray 规则...';
+    const j = await api('/api/panel/ipv6', {method:'POST', body:JSON.stringify({enabled})});
+    setStatus(j.msg || (enabled ? '已开启 IPv6' : '已关闭 IPv6'), true);
+    if($('ipv6StatusText')) $('ipv6StatusText').textContent = enabled ? '当前状态：IPv6 已开启（双栈出网）' : '当前状态：IPv6 已关闭（纯 IPv4 出网）';
+  }catch(e){
+    setStatus('设置 IPv6 失败: '+e.message, false);
+    if($('ipv6StatusText')) $('ipv6StatusText').textContent = '设置失败: '+e.message;
+  }finally{
+    $('saveIPv6').disabled = false;
+  }
+}
+
 $('logout').onclick=doLogout;
 $('submitEditor').onclick=submitEditor;
 $('reset').onclick=resetForm;
 $('saveUsername').onclick=savePanelUsername;
 $('savePassword').onclick=savePanelPassword;
+if($('saveIPv6')) $('saveIPv6').onclick=saveIPv6Setting;
 $('xrayVersionCheck').onclick=checkXrayVersion;
 $('xrayChannel').onchange=checkXrayVersion;
 $('xrayUpdateSelected').onclick=updateSelectedXray;

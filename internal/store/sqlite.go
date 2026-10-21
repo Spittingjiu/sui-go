@@ -58,6 +58,9 @@ func NewSQLite(dbPath string) (*SQLiteStore, error) {
 	if !db.Migrator().HasColumn(&model.InboundDB{}, "chain") {
 		_ = db.Exec("ALTER TABLE inbound_dbs ADD COLUMN chain text DEFAULT '{}'").Error
 	}
+	if !db.Migrator().HasColumn(&model.PanelSettingDB{}, "ipv6_enabled") {
+		_ = db.Exec("ALTER TABLE panel_setting_dbs ADD COLUMN ipv6_enabled numeric DEFAULT 0").Error
+	}
 	_ = db.Exec("CREATE INDEX IF NOT EXISTS idx_inbound_dbs_port ON inbound_dbs(port)").Error
 	_ = db.Exec("CREATE INDEX IF NOT EXISTS idx_inbound_dbs_protocol ON inbound_dbs(protocol)").Error
 	_ = db.Exec("CREATE INDEX IF NOT EXISTS idx_inbound_dbs_enable ON inbound_dbs(enable)").Error
@@ -185,6 +188,15 @@ func (s *SQLiteStore) RotateAPIToken(token string) (model.PanelSettingDB, error)
 		return model.PanelSettingDB{}, err
 	}
 	return p, nil
+}
+
+func (s *SQLiteStore) SetIPv6Enabled(enabled bool) error {
+	p, err := s.GetPanelSetting()
+	if err != nil {
+		return err
+	}
+	p.IPv6Enabled = enabled
+	return s.db.Save(&p).Error
 }
 
 func storeRandomToken(n int) string {

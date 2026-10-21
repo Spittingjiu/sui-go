@@ -65,6 +65,7 @@ type ForwardDB struct {
 }
 
 type PanelSettingDB struct {
+<<<<<<< HEAD
 	ID        uint   `gorm:"primaryKey" json:"id"`
 	Username  string `json:"username"`
 	PanelPath string `json:"panelPath"`
@@ -78,4 +79,13 @@ type PanelSettingDB struct {
 	SubgoHasToken    bool      `json:"-" gorm:"-"`
 	CreatedAt        time.Time `json:"createdAt"`
 	UpdatedAt        time.Time `json:"updatedAt"`
+=======
+	ID          uint      `gorm:"primaryKey" json:"id"`
+	Username    string    `json:"username"`
+	PanelPath   string    `json:"panelPath"`
+	APIToken    string    `json:"apiToken"`
+	IPv6Enabled bool      `json:"ipv6Enabled" gorm:"column:ipv6_enabled;default:false"`
+	CreatedAt   time.Time `json:"createdAt"`
+	UpdatedAt   time.Time `json:"updatedAt"`
+>>>>>>> b32289e (feat(settings): add IPv6 toggle to control dual-stack and outbound domain strategy)
 }

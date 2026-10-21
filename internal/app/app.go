@@ -119,6 +119,7 @@ func (a *App) routes() {
 	a.mux.HandleFunc("/api/panel/connect-sub", a.handlePanelConnectSub)
 	a.mux.HandleFunc("/api/panel/subgo", a.handlePanelSubgo)
 	a.mux.HandleFunc("/api/panel/subgo/verify", a.handlePanelSubgoVerify)
+	a.mux.HandleFunc("/api/panel/ipv6", a.handlePanelIPv6)
 
 	a.mux.HandleFunc("/api/system/status", a.handleSystemStatus)
 	a.mux.HandleFunc("/api/system/restart-panel", a.handleSystemRestartPanel)
@@ -2290,8 +2291,9 @@ func emptyDefault(v, d string) string {
 	return v
 }
 
-func computeInboundCacheKey(rows []model.Inbound) string {
+func computeInboundCacheKey(rows []model.Inbound, ipv6Enabled bool) string {
 	h := sha256.New()
+	_, _ = h.Write([]byte(fmt.Sprintf("ipv6:%t|", ipv6Enabled)))
 	for _, in := range rows {
 		_, _ = h.Write([]byte(fmt.Sprintf("%d|%s|%d|%s|%t|%s|", in.ID, in.Remark, in.Port, in.Protocol, in.Enable, in.SniffingOverride)))
 		sb, _ := json.Marshal(in.Settings)
@@ -2402,7 +2404,11 @@ func (a *App) buildXrayConfig() (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	key := computeInboundCacheKey(rows)
+	ipv6Enabled := false
+	if p, err := a.store.GetPanelSetting(); err == nil {
+		ipv6Enabled = p.IPv6Enabled
+	}
+	key := computeInboundCacheKey(rows, ipv6Enabled)
 	a.cacheMu.RLock()
 	if a.cacheCfg != nil && a.cacheKey == key {
 		cfg := cloneAnyMap(a.cacheCfg)
@@ -2412,7 +2418,11 @@ func (a *App) buildXrayConfig() (map[string]any, error) {
 	a.cacheMu.RUnlock()
 
 	inbounds := make([]map[string]any, 0, len(rows)+1)
-	outbounds := []map[string]any{{"protocol": "freedom", "tag": "direct"}, {"protocol": "blackhole", "tag": "blocked"}}
+	directSettings := map[string]any{"domainStrategy": "UseIPv4"}
+	if ipv6Enabled {
+		directSettings = map[string]any{"domainStrategy": "AsIs"}
+	}
+	outbounds := []map[string]any{{"protocol": "freedom", "tag": "direct", "settings": directSettings}, {"protocol": "blackhole", "tag": "blocked"}}
 	rules := []map[string]any{{"type": "field", "inboundTag": []string{"api-in"}, "outboundTag": "api"}}
 	for _, in := range rows {
 		settings := in.Settings
@@ -2977,6 +2987,7 @@ func (a *App) handlePanelSettings(w http.ResponseWriter, r *http.Request) {
 			"panelPath":          p.PanelPath,
 			"forceResetPassword": false,
 			"panelTokenMasked":   maskToken(p.APIToken),
+			"ipv6Enabled":        p.IPv6Enabled,
 		}})
 	case http.MethodPost:
 		var req struct {
@@ -2997,6 +3008,7 @@ func (a *App) handlePanelSettings(w http.ResponseWriter, r *http.Request) {
 			"panelPath":          p.PanelPath,
 			"forceResetPassword": false,
 			"panelTokenMasked":   maskToken(p.APIToken),
+			"ipv6Enabled":        p.IPv6Enabled,
 		}})
 	default:
 		a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -3922,4 +3934,78 @@ func (a *App) writeJSON(w http.ResponseWriter, code int, v any) {
 		return
 	}
 	_, _ = w.Write(buf.Bytes())
+}
+
+func (a *App) handlePanelIPv6(w http.ResponseWriter, r *http.Request) {
+	if !a.checkAuth(r) {
+		a.writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		p, err := a.store.GetPanelSetting()
+		if err != nil {
+			a.writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": map[string]any{"enabled": p.IPv6Enabled}})
+	case http.MethodPost:
+		var req struct {
+			Enabled bool `json:"enabled"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			a.writeErr(w, http.StatusBadRequest, "invalid json")
+			return
+		}
+		if err := a.store.SetIPv6Enabled(req.Enabled); err != nil {
+			a.writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		_ = a.applyIPv6(req.Enabled)
+		a.invalidateXrayConfigCache()
+		_ = a.exportAndApplyXrayConfigDirect()
+		msg := "IPv6 已关闭（强制仅 IPv4 出网，防泄露）"
+		if req.Enabled {
+			msg = "IPv6 已开启（支持 IPv4 + IPv6 双栈出网）"
+		}
+		a.writeJSON(w, http.StatusOK, map[string]any{"success": true, "obj": map[string]any{"enabled": req.Enabled}, "msg": msg})
+	default:
+		a.writeErr(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+func (a *App) applyIPv6(enabled bool) error {
+	val := "1"
+	if enabled {
+		val = "0"
+	}
+	conf := fmt.Sprintf("net.ipv6.conf.all.disable_ipv6 = %s\nnet.ipv6.conf.default.disable_ipv6 = %s\nnet.ipv6.conf.lo.disable_ipv6 = %s\n", val, val, val)
+	_ = os.WriteFile("/etc/sysctl.d/99-disable-ipv6.conf", []byte(conf), 0o644)
+	_, _ = a.runBestEffort(fmt.Sprintf("sysctl -w net.ipv6.conf.all.disable_ipv6=%s net.ipv6.conf.default.disable_ipv6=%s net.ipv6.conf.lo.disable_ipv6=%s", val, val, val))
+	_, _ = a.runBestEffort("sysctl --system >/dev/null 2>&1 || true")
+	return nil
+}
+
+func (a *App) exportAndApplyXrayConfigDirect() error {
+	cfg, err := a.buildXrayConfig()
+	if err != nil {
+		return err
+	}
+	_ = ensureHY2CertificateFiles()
+	b, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(a.cfg.XrayConfigOut), 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(a.cfg.XrayConfigOut, b, 0o644); err != nil {
+		return err
+	}
+	if strings.TrimSpace(a.cfg.XrayReloadCmd) != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		_ = exec.CommandContext(ctx, "bash", "-lc", a.cfg.XrayReloadCmd).Run()
+	}
+	return nil
 }
