@@ -65,27 +65,16 @@ type ForwardDB struct {
 }
 
 type PanelSettingDB struct {
-<<<<<<< HEAD
-	ID        uint   `gorm:"primaryKey" json:"id"`
-	Username  string `json:"username"`
-	PanelPath string `json:"panelPath"`
-	APIToken  string `json:"apiToken"`
-	// SUBGO 一键对接配置，保存后下次点一下即可重新推送。
-	SubgoURL  string `json:"subgoUrl"`
-	SubgoUser string `json:"subgoUser"`
-	SubgoPass string `json:"-"`
-	// SUBGO 开了 IP 白名单时，用它做 X-Sui-Bridge-Token 放行。
+	ID               uint      `gorm:"primaryKey" json:"id"`
+	Username         string    `json:"username"`
+	PanelPath        string    `json:"panelPath"`
+	APIToken         string    `json:"apiToken"`
+	SubgoURL         string    `json:"subgoUrl"`
+	SubgoUser        string    `json:"subgoUser"`
+	SubgoPass        string    `json:"-"`
 	SubgoBridgeToken string    `json:"subgoBridgeToken"`
 	SubgoHasToken    bool      `json:"-" gorm:"-"`
+	IPv6Enabled      bool      `json:"ipv6Enabled" gorm:"column:ipv6_enabled;default:false"`
 	CreatedAt        time.Time `json:"createdAt"`
 	UpdatedAt        time.Time `json:"updatedAt"`
-=======
-	ID          uint      `gorm:"primaryKey" json:"id"`
-	Username    string    `json:"username"`
-	PanelPath   string    `json:"panelPath"`
-	APIToken    string    `json:"apiToken"`
-	IPv6Enabled bool      `json:"ipv6Enabled" gorm:"column:ipv6_enabled;default:false"`
-	CreatedAt   time.Time `json:"createdAt"`
-	UpdatedAt   time.Time `json:"updatedAt"`
->>>>>>> b32289e (feat(settings): add IPv6 toggle to control dual-stack and outbound domain strategy)
 }
